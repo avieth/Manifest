@@ -59,26 +59,31 @@ data TestManifestWriteFailure = AlreadyPresent
   deriving (Show)
 
 instance Manifest TestManifest where
+
   type ManifestMonad TestManifest = State [(BS.ByteString, [BS.ByteString])]
   -- ^ Problem: the phantom type in the Manifest means we can't say
   -- the state in our monad is a TestManifest a.
   type ManifestReadFailure TestManifest = TestManifestReadFailure
   type ManifestWriteFailure TestManifest = TestManifestWriteFailure
+
   manifestRead proxy bs = do
       list <- get
       return $ case find ((==) bs . fst) list of
-        Nothing -> Right Nothing
-        Just (_, bss) -> Right (Just bss)
+        Nothing -> Nothing
+        Just (_, bss) -> Just bss
+
   manifestWrite proxy bs bss = do
       list <- get
       case find ((==) bs . fst) list of
-        Just _ -> return $ Just AlreadyPresent
+        -- TODO should use exception transformer and throw.
+        Just _ -> return ()
         Nothing -> do
           put ((bs, bss) : list)
-          return Nothing
+          return ()
+
   manifestRun (TM list) action =
       let (x, s) = runState action list
-      in  return $ Right (x, TM s)
+      in  return $ (Right x, TM s)
 
 alex = User "alex"
 john = User "john"
@@ -94,12 +99,17 @@ main = do
   let action = do {
       write alex' (Proxy :: Proxy TestManifest);
       write john' (Proxy :: Proxy TestManifest);
-      read alex (Proxy :: Proxy (TestManifest (WithSaltedDigest User)))
+      read alex (Proxy :: Proxy (TestManifest (WithSaltedDigest User)));
     }
-  Right (x, _) <- manifestRun tmSaltedDigest action
+  let action2 = read john (Proxy :: Proxy (TestManifest (WithSaltedDigest User)))
+  (Right x, tmSaltedDigest') <- manifest tmSaltedDigest action
+  (Right y, _) <- manifest tmSaltedDigest' action2
+  (Right z, _) <- manifest tmSaltedDigest action2
   print x
+  print y
+  print z
 {-
-  Right (x, _) <- manifestRun tmEmail $ do
+  (Right x, _) <- manifest tmEmail $ do
     write alex'
     --write john'
     --read alex
