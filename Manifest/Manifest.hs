@@ -34,16 +34,18 @@ import Data.Proxy
 read
   :: forall a k manifest u .
      ( Manifest manifest
+     , Monad (ManifestMonad manifest)
      , Manifestible a
      , k ~ ManifestibleKey a
      , ManifestKey k
      , ManifestValue (ManifestibleValue a)
      )
   => k
-  -> manifest a
-  -> IO (Either (ManifestReadFailure manifest) (ManifestRead (manifest a) a))
-read key m = do
-    eitherFailureSuccess <- manifestRead m bkey
+  -> u (manifest a)
+  -- ^ Need a proxy to fix the manifest and value types.
+  -> ManifestMonad manifest (Either (ManifestReadFailure manifest) (ManifestRead (manifest a) a))
+read key _ = do
+    eitherFailureSuccess <- manifestRead (Proxy :: Proxy manifest) bkey
     return $ ifElse eitherFailureSuccess ifFailure ifSuccess
 
   where
@@ -69,17 +71,19 @@ read key m = do
     ifNotPulled = Right ReadError
 
 write
-  :: forall a manifest .
+  :: forall a manifest u .
      ( Manifest manifest
+     , Monad (ManifestMonad manifest)
      , Manifestible a
      , ManifestKey (ManifestibleKey a)
      , ManifestValue (ManifestibleValue a)
      )
   => a
-  -> manifest a
-  -> IO (Either (ManifestWriteFailure manifest) (ManifestWrite (manifest a) a))
-write x m = do
-    maybeFailure <- manifestWrite m bkey bvalue
+  -> u manifest
+  -- ^ Need a proxy to fix the manifest type.
+  -> ManifestMonad manifest (Either (ManifestWriteFailure manifest) (ManifestWrite (manifest a) a))
+write x _ = do
+    maybeFailure <- manifestWrite (Proxy :: Proxy manifest) bkey bvalue
     return $ inCase maybeFailure ifFailure ifSuccess
 
   where
@@ -101,24 +105,40 @@ data ManifestRead manifest a = Found a | NotFound | ReadError
 data ManifestWrite manifest a = Written a
   deriving (Show)
 
+data ManifestFailure manifest
+  = ReadFailure (ManifestReadFailure manifest)
+  | WriteFailure (ManifestWriteFailure manifest)
+
 -- | Indicates that some type can be used as a manifest.
 class Manifest manifest where
 
+  type ManifestMonad manifest :: * -> *
   type ManifestReadFailure manifest :: *
   type ManifestWriteFailure manifest :: *
 
   manifestRead
-    :: manifest a
+    :: u manifest
     -> BS.ByteString
-    -> IO (Either (ManifestReadFailure manifest) (Maybe [BS.ByteString]))
+    -> ManifestMonad manifest (Either (ManifestReadFailure manifest) (Maybe [BS.ByteString]))
   -- ^ Try to read from a Manifest. If successful, Just indicates that a value
   --   was found, and Nothing indicates that no value was found.
+
   manifestWrite
-    :: manifest a
+    :: u manifest
     -> BS.ByteString
     -> [BS.ByteString]
-    -> IO (Maybe (ManifestWriteFailure manifest))
+    -> ManifestMonad manifest (Maybe (ManifestWriteFailure manifest))
   -- ^ Try to write to a Manifest.
+
+  manifestRun
+    :: manifest a
+    -> ManifestMonad manifest a
+    -> IO (Either (ManifestFailure manifest) (a, manifest a))
+  -- ^ Run a manifest computation under a given manifest. This is the point
+  --   at which a particular Manifest value comes into play and gives
+  --   meaning to the Manifest term (read and write call).
+  --   Must be exception safe! If a Right is given, then everything went
+  --   OK.
 
 -- | Indicate that values of some type can be used as keys into a Manifest.
 --   This is just serialization and deserialization to and from ByteString.

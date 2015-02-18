@@ -7,7 +7,8 @@
 import Prelude hiding (read)
 import qualified Data.ByteString as BS
 import Data.List (find)
-import Data.IORef
+import Control.Monad.Trans.State
+import Data.Proxy
 import Manifest.Manifest
 
 data User = User BS.ByteString
@@ -48,31 +49,36 @@ instance Manifestible (WithEmail a) where
   manifestibleValue (WithEmail _ x) = x
   manifestibleFactorization = WithEmail
 
-data TestManifest a = TM (IORef [(BS.ByteString, [BS.ByteString])])
+data TestManifest a = TM [(BS.ByteString, [BS.ByteString])]
 
-emptyTM :: IO (TestManifest a)
-emptyTM = do
-  ref <- newIORef []
-  return $ TM ref
+emptyTM :: TestManifest a
+emptyTM = TM []
 
 data TestManifestReadFailure
 data TestManifestWriteFailure = AlreadyPresent
+  deriving (Show)
 
 instance Manifest TestManifest where
+  type ManifestMonad TestManifest = State [(BS.ByteString, [BS.ByteString])]
+  -- ^ Problem: the phantom type in the Manifest means we can't say
+  -- the state in our monad is a TestManifest a.
   type ManifestReadFailure TestManifest = TestManifestReadFailure
   type ManifestWriteFailure TestManifest = TestManifestWriteFailure
-  manifestRead (TM ref) bs = do
-      list <- readIORef ref 
+  manifestRead proxy bs = do
+      list <- get
       return $ case find ((==) bs . fst) list of
         Nothing -> Right Nothing
         Just (_, bss) -> Right (Just bss)
-  manifestWrite (TM ref) bs bss = do
-      list <- readIORef ref
+  manifestWrite proxy bs bss = do
+      list <- get
       case find ((==) bs . fst) list of
         Just _ -> return $ Just AlreadyPresent
         Nothing -> do
-          writeIORef ref ((bs, bss) : list)
+          put ((bs, bss) : list)
           return Nothing
+  manifestRun (TM list) action =
+      let (x, s) = runState action list
+      in  return $ Right (x, TM s)
 
 alex = User "alex"
 john = User "john"
@@ -83,8 +89,22 @@ alexEmail = WithEmail alex "alex@vieth.com"
 richardEmail = WithEmail richard "richard@carstone.com"
 
 main = do
-  tmSaltedDigest <- emptyTM
-  tmEmail <- emptyTM
+  let tmSaltedDigest = emptyTM
+  let tmEmail = emptyTM
+  let action = do {
+      write alex' (Proxy :: Proxy TestManifest);
+      write john' (Proxy :: Proxy TestManifest);
+      read alex (Proxy :: Proxy (TestManifest (WithSaltedDigest User)))
+    }
+  Right (x, _) <- manifestRun tmSaltedDigest action
+  print x
+{-
+  Right (x, _) <- manifestRun tmEmail $ do
+    write alex'
+    --write john'
+    --read alex
+  print x
+
   write alex' tmSaltedDigest
   write richardEmail tmEmail
   -- At this point we restrict tm to the type
@@ -100,3 +120,4 @@ main = do
   print y
   print z
   print z'
+-}
