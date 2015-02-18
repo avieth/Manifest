@@ -12,8 +12,7 @@ module Manifest.Manifest (
 
   , ManifestRead
   , ManifestWrite
-  , ManifestFailure
-  , PeculiarManifestFailure(..)
+  , ManifestFailure(..)
 
   , Manifest(..)
 
@@ -135,12 +134,6 @@ data ManifestWrite manifest a = Written a
 data GeneralManifestFailure = ReadFailure
   deriving (Show)
 
-data PeculiarManifestFailure manifest
-  = PeculiarReadFailure (ManifestReadFailure manifest)
-  -- ^ A read failure peculiar to the given Manifest.
-  | PeculiarWriteFailure (ManifestWriteFailure manifest)
-  -- ^ A write failure peculiar to the given Manifest.
-
 data ManifestFailure manifest
   = GeneralFailure GeneralManifestFailure
   -- ^ Indicates that the data found for some ManifestKey was not
@@ -157,8 +150,7 @@ instance Show (ManifestFailure manifest) where
 class Manifest manifest where
 
   type ManifestMonad manifest :: * -> *
-  type ManifestReadFailure manifest :: *
-  type ManifestWriteFailure manifest :: *
+  type PeculiarManifestFailure manifest :: *
 
   manifestRead
     :: u manifest

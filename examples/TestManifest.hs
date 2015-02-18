@@ -54,8 +54,7 @@ data TestManifest a = TM [(BS.ByteString, [BS.ByteString])]
 emptyTM :: TestManifest a
 emptyTM = TM []
 
-data TestManifestReadFailure
-data TestManifestWriteFailure = AlreadyPresent
+data TestManifestFailure = AlreadyPresent
   deriving (Show)
 
 instance Manifest TestManifest where
@@ -63,8 +62,7 @@ instance Manifest TestManifest where
   type ManifestMonad TestManifest = State [(BS.ByteString, [BS.ByteString])]
   -- ^ Problem: the phantom type in the Manifest means we can't say
   -- the state in our monad is a TestManifest a.
-  type ManifestReadFailure TestManifest = TestManifestReadFailure
-  type ManifestWriteFailure TestManifest = TestManifestWriteFailure
+  type PeculiarManifestFailure TestManifest = TestManifestFailure
 
   manifestRead proxy bs = do
       list <- get
