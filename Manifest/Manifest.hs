@@ -3,6 +3,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
 
 module Manifest.Manifest (
 
@@ -36,31 +38,39 @@ import Control.Monad.Trans.Except
 import Control.Monad.Trans.Class
 import Data.Proxy
 
+-- TODO move these guys; can't find an implementation on Hackage.
+-- Perhaps ask the IRC channel?
+data Nat = Z | S Nat
+data Vect :: * -> Nat -> * where
+  VNil :: Vect a Z
+  VCons :: a -> Vect a n -> Vect a (S n)
+
 read
-  :: forall a k manifest u .
+  :: forall a k manifest u l .
      ( Manifest manifest
      , Monad (ManifestMonad manifest)
      , Manifestible a
      , k ~ ManifestibleKey a
      , ManifestKey k
      , ManifestValue (ManifestibleValue a)
+     , l ~ ManifestValueLength (ManifestibleValue a)
      )
   => k
   -> u (manifest a)
   -- ^ Need a proxy to fix the manifest and value types.
   -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
 read key _ = do
-    maybeBytestrings <- lift $ manifestRead (Proxy :: Proxy manifest) bkey
+    maybeBytestrings <- lift $ manifestRead (Proxy :: Proxy manifest) (Proxy :: Proxy l) bkey
     inCase maybeBytestrings found notFound
 
   where
 
     bkey = manifestibleKeyDump key
 
-    readBytestrings :: [BS.ByteString] -> Maybe a
+    readBytestrings :: Vect BS.ByteString l -> Maybe a
     readBytestrings bss = manifestiblePull (Proxy :: Proxy a) (bkey, bss)
 
-    found :: [BS.ByteString] -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
+    found :: Vect BS.ByteString l -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
     found x =
       let maybeRead = readBytestrings x
       in  inCase maybeRead readOK readNotOK
@@ -75,19 +85,20 @@ read key _ = do
     readNotOK = throwE ReadFailure
 
 write
-  :: forall a manifest u .
+  :: forall a manifest u l .
      ( Manifest manifest
      , Monad (ManifestMonad manifest)
      , Manifestible a
      , ManifestKey (ManifestibleKey a)
      , ManifestValue (ManifestibleValue a)
+     , l ~ ManifestValueLength (ManifestibleValue a)
      )
   => a
   -> u manifest
   -- ^ Need a proxy to fix the manifest type.
   -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestWrite (manifest a) a)
 write x _ = do
-    () <- lift $ manifestWrite (Proxy :: Proxy manifest) bkey bvalue
+    () <- lift $ manifestWrite (Proxy :: Proxy manifest) (Proxy :: Proxy l) bkey bvalue
     return $ Written x
 
   where
@@ -154,15 +165,17 @@ class Manifest manifest where
 
   manifestRead
     :: u manifest
+    -> u' l
     -> BS.ByteString
-    -> ManifestMonad manifest (Maybe [BS.ByteString])
+    -> ManifestMonad manifest (Maybe (Vect BS.ByteString l))
   -- ^ Try to read from a Manifest. Nothing indicates not found.
   --   Failure can be expressed by a suitable ManifestMonad.
 
   manifestWrite
     :: u manifest
+    -> u' l
     -> BS.ByteString
-    -> [BS.ByteString]
+    -> Vect BS.ByteString l
     -> ManifestMonad manifest ()
   -- ^ Try to write to a Manifest.
   --   Failure can be expressed by a suitable ManifestMonad.
@@ -190,8 +203,9 @@ class ManifestKey k where
 --   This is just serialization and deserialization to and from list of
 --   ByteStrings.
 class ManifestValue v where
-  manifestibleValueDump :: v -> [BS.ByteString]
-  manifestibleValuePull :: [BS.ByteString] -> Maybe v
+  type ManifestValueLength v :: Nat
+  manifestibleValueDump :: v -> Vect BS.ByteString (ManifestValueLength v)
+  manifestibleValuePull :: Vect BS.ByteString (ManifestValueLength v) -> Maybe v
   -- ^ Must have that
   --
   --     manifestibleValuePull . manifestibleValueDump = Just
@@ -201,9 +215,10 @@ instance ManifestKey BS.ByteString where
   manifestibleKeyPull = Just
 
 instance ManifestValue BS.ByteString where
-  manifestibleValueDump = pure
+  type ManifestValueLength BS.ByteString = S Z
+  manifestibleValueDump bs = VCons bs VNil
   manifestibleValuePull bss = case bss of
-    [bs] -> Just bs
+    VCons bs VNil -> Just bs
     _ -> Nothing
 
 -- | A value which can be used with a Manifest.
@@ -235,7 +250,7 @@ class Manifestible a where
        , ManifestValue (ManifestibleValue a)
        )
     => u a
-    -> (BS.ByteString, [BS.ByteString])
+    -> (BS.ByteString, Vect BS.ByteString (ManifestValueLength (ManifestibleValue a)))
     -> Maybe a
   manifestiblePull proxy (k, v) =
         manifestibleFactorization
@@ -247,7 +262,7 @@ class Manifestible a where
        , ManifestValue (ManifestibleValue a)
        )
     => a
-    -> (BS.ByteString, [BS.ByteString])
+    -> (BS.ByteString, Vect BS.ByteString (ManifestValueLength (ManifestibleValue a)))
   manifestibleDump x =
     let mkey = manifestibleKey x
         mval = manifestibleValue x
