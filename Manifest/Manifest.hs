@@ -5,6 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE Rank2Types #-}
 
 module Manifest.Manifest (
 
@@ -37,13 +38,7 @@ import Control.Applicative
 import Control.Monad.Trans.Except
 import Control.Monad.Trans.Class
 import Data.Proxy
-
--- TODO move these guys; can't find an implementation on Hackage.
--- Perhaps ask the IRC channel?
-data Nat = Z | S Nat
-data Vect :: * -> Nat -> * where
-  VNil :: Vect a Z
-  VCons :: a -> Vect a n -> Vect a (S n)
+import Data.TypeNat.Vect
 
 read
   :: forall a k manifest u l .
@@ -54,6 +49,7 @@ read
      , ManifestKey k
      , ManifestValue (ManifestibleValue a)
      , l ~ ManifestValueLength (ManifestibleValue a)
+     , IsNat l
      )
   => k
   -> u (manifest a)
@@ -92,6 +88,7 @@ write
      , ManifestKey (ManifestibleKey a)
      , ManifestValue (ManifestibleValue a)
      , l ~ ManifestValueLength (ManifestibleValue a)
+     , IsNat l
      )
   => a
   -> u manifest
@@ -164,18 +161,22 @@ class Manifest manifest where
   type PeculiarManifestFailure manifest :: *
 
   manifestRead
-    :: u manifest
-    -> u' l
+    :: ( IsNat n
+       )
+    => u manifest
+    -> u' n
     -> BS.ByteString
-    -> ManifestMonad manifest (Maybe (Vect BS.ByteString l))
+    -> ManifestMonad manifest (Maybe (Vect BS.ByteString n))
   -- ^ Try to read from a Manifest. Nothing indicates not found.
   --   Failure can be expressed by a suitable ManifestMonad.
 
   manifestWrite
-    :: u manifest
-    -> u' l
+    :: ( IsNat n
+       )
+    => u manifest
+    -> u' n
     -> BS.ByteString
-    -> Vect BS.ByteString l
+    -> Vect BS.ByteString n
     -> ManifestMonad manifest ()
   -- ^ Try to write to a Manifest.
   --   Failure can be expressed by a suitable ManifestMonad.

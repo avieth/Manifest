@@ -3,12 +3,14 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DataKinds #-}
 
 import Prelude hiding (read)
 import qualified Data.ByteString as BS
 import Data.List (find)
 import Control.Monad.Trans.State
 import Data.Proxy
+import Data.TypeNat.Vect
 import Manifest.Manifest
 
 data User = User BS.ByteString
@@ -30,9 +32,10 @@ instance ManifestKey User where
   manifestibleKeyPull = Just . User
 
 instance ManifestValue (Digest, Salt) where
-  manifestibleValueDump (digest, salt) = [digest, salt]
+  type ManifestValueLength (Digest, Salt) = S (S Z)
+  manifestibleValueDump (digest, salt) = VCons digest (VCons salt VNil)
   manifestibleValuePull bs = case bs of
-    [digest, salt] -> Just (digest, salt)
+    VCons digest (VCons salt VNil) -> Just (digest, salt)
     _ -> Nothing
 
 instance Manifestible (WithSaltedDigest a) where
@@ -64,18 +67,23 @@ instance Manifest TestManifest where
   -- the state in our monad is a TestManifest a.
   type PeculiarManifestFailure TestManifest = TestManifestFailure
 
-  manifestRead proxy bs = do
+  manifestRead proxy lengthProxy bs = do
       list <- get
       return $ case find ((==) bs . fst) list of
         Nothing -> Nothing
-        Just (_, bss) -> Just bss
+        Just (_, bss) -> case listToVect bss of
+          Nothing -> Nothing
+          -- TODO Must use an ExceptT so that we can throw a translation error
+          -- in case the list is not the right size.
+          x -> x
 
-  manifestWrite proxy bs bss = do
+  manifestWrite proxy proxy' bs vect = do
       list <- get
       case find ((==) bs . fst) list of
         -- TODO should use exception transformer and throw.
         Just _ -> return ()
         Nothing -> do
+          let bss = vectToList vect
           put ((bs, bss) : list)
           return ()
 
@@ -102,7 +110,7 @@ main = do
   let action2 = read john (Proxy :: Proxy (TestManifest (WithSaltedDigest User)))
   (Right x, tmSaltedDigest') <- manifest tmSaltedDigest action
   (Right y, _) <- manifest tmSaltedDigest' action2
-  (Right z, _) <- manifest tmSaltedDigest action2
+  (Right z, _) <- manifest tmSaltedDigest' action2
   print x
   print y
   print z
