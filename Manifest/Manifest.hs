@@ -126,12 +126,19 @@ instance ListTo (Vect2 n) a => ListTo (Vect2 (S n)) a where
 --
 class IsNat (n :: Nat) where
   induction :: (a Z) -> (forall m . a m -> a (S m)) -> a n
+  recursion :: (forall m . b -> a m -> a (S m)) -> (b -> a Z) -> (b -> b) -> b -> a n
+  recursion' :: (forall m . a (S m) -> b -> b) -> (a Z -> b) -> a n -> b
+  --recursion' :: (forall m . a (S m) -> a m) -> (a Z) -> a n
 
 instance IsNat Z where
   induction ifZ _ = ifZ
+  recursion _ ifZ _ = ifZ
+  recursion' _ ifZ = ifZ
 
 instance IsNat n => IsNat (S n) where
   induction ifZ ifS = ifS (induction ifZ ifS)
+  recursion ifS ifZ reduce x = ifS x (recursion ifS ifZ reduce (reduce x))
+  recursion' ifS ifZ x = ifS x (recursion' ifS ifZ x)
 -- So there we have it, but how can we use it?
 
 newtype MaybeVect a n = MV {
@@ -158,11 +165,34 @@ listToVect' xs = induction (MV $ Just (VNil, xs)) inductive
 -- Every inductive case has to be the same, so we can't detect it. Better
 -- to work top-down: detect at base case.
 
-listToVect'' :: IsNat n => [a] -> MaybeVect a n
-listToVect'' xs = induction base inductive
+-- recursion :: (forall m . b -> a m -> a (S m)) -> (b -> a Z) -> (b -> b) -> b -> a n
+
+newtype MaybeVect' a n = MV' {
+    unMV' :: Maybe (Vect a n)
+  }
+
+listToVect'' :: IsNat n => [a] -> MaybeVect' a n
+listToVect'' = recursion inductive base reduce
+
   where
-    base :: MaybeVect a Z
-    base 
+    
+    inductive :: [a] -> MaybeVect' a m -> MaybeVect' a (S m)
+    inductive xs maybeVect = case maybeVect of
+      MV' Nothing -> MV' Nothing
+      MV' (Just vect) -> case xs of 
+        [] -> MV' Nothing
+        (x : _) -> MV' (Just (VCons x vect))
+
+    base :: [a] -> MaybeVect' a Z
+    base xs = case xs of
+      [] -> MV' (Just VNil)
+      _ -> MV' Nothing
+
+    reduce :: [a] -> [a]
+    reduce xs = case xs of
+      [] -> []
+      (x : xs) -> xs
+
 
 read
   :: forall a k manifest u l .
