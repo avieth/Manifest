@@ -5,6 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE Rank2Types #-}
 
 module Manifest.Manifest (
 
@@ -17,6 +18,12 @@ module Manifest.Manifest (
   , ManifestFailure(..)
 
   , Manifest(..)
+
+  -- TODO should be able to pull these from some other package
+  , Nat(..)
+  , Vect(..)
+  , vectToList
+  , listToVect
 
   , ManifestKey(..)
   , ManifestValue(..)
@@ -45,6 +52,118 @@ data Vect :: * -> Nat -> * where
   VNil :: Vect a Z
   VCons :: a -> Vect a n -> Vect a (S n)
 
+showVect :: Show a => Vect a l -> String
+showVect VNil = "VNil"
+showVect (VCons x xs) = show x ++ " , " ++ showVect xs
+
+vectToList :: Vect a n -> [a]
+vectToList v = case v of
+  VNil -> []
+  VCons x xs -> x : vectToList xs
+
+{-
+class ListToVect n where
+  listToVect' :: [a] -> Maybe (Vect a n)
+
+instance ListToVect Z where
+  listToVect' [] = Just VNil
+  listToVect' _ = Nothing
+
+instance ListToVect n => ListToVect (S n) where
+  listToVect' [] = Nothing
+  listToVect' (x : xs) = VCons x <$> listToVect' xs 
+
+listToVect :: ListToVect l => [a] -> u l -> Maybe (Vect a l)
+listToVect xs _ = listToVect' xs
+--listToVect :: [a] -> u (l :: Nat) -> Maybe (Vect a l)
+--listToVect xs proxy = listToVect' xs
+
+data ListToVect2 :: Nat -> * where
+  MkListToVect2 :: ([b] -> Maybe (Vect b n)) -> ListToVect2 n
+
+listToVectNil :: ListToVect2 Z
+listToVectNil = MkListToVect2 $ \x -> case x of
+  [] -> Just VNil
+  _ -> Nothing
+
+listToVectCons :: ListToVect2 n -> ListToVect2 (S n)
+listToVectCons (MkListToVect2 mk) = MkListToVect2 $ \x -> case x of
+  [] -> Nothing
+  (y : ys) -> VCons y <$> mk ys
+
+data Vect2 :: Nat -> * -> * where
+  VNil2 :: Vect2 Z a
+  VCons2 :: a -> Vect2 n a -> Vect2 (S n) a
+
+class ListTo v a where
+  listTo :: [a] -> Maybe (v a)
+
+instance ListTo (Vect2 Z) a where
+  listTo x = case x of
+    [] -> Just VNil2
+    _ -> Nothing
+
+instance ListTo (Vect2 n) a => ListTo (Vect2 (S n)) a where
+  listTo xs = case xs of
+    [] -> Nothing
+    (y : ys) -> VCons2 y <$> (listTo ys :: Maybe (Vect2 n a))
+-}
+
+-- Focus: here's what we really want.
+-- Somehow we have to switch based on the type. Can't the GADT above help
+-- us? No I think we just need typeclasses... I don't know of any other
+-- way to have the type direct the values in Haskell.
+--list2Vect :: [a] -> u (n :: Nat) -> Maybe (Vect2 n a)
+--list2Vect = undefined
+
+-- Idea: recursion principle for Nat on the types.
+-- Then maybe we can do
+--
+--   type MaybeVect a n = Maybe (Vect a n)
+--
+--   listToVect :: [a] -> MaybeVect a n
+--   listToVect = induction (Just VNil) (
+--
+class IsNat (n :: Nat) where
+  induction :: (a Z) -> (forall m . a m -> a (S m)) -> a n
+
+instance IsNat Z where
+  induction ifZ _ = ifZ
+
+instance IsNat n => IsNat (S n) where
+  induction ifZ ifS = ifS (induction ifZ ifS)
+-- So there we have it, but how can we use it?
+
+newtype MaybeVect a n = MV {
+    unMV :: Maybe (Vect a n, [a])
+  }
+
+listToVect :: IsNat n => [a] -> u n -> Maybe (Vect a n)
+listToVect xs _ = fst <$> unMV (listToVect' xs)
+
+listToVect' :: IsNat n => [a] -> MaybeVect a n
+listToVect' xs = induction (MV $ Just (VNil, xs)) inductive
+  where
+    inductive :: MaybeVect a m -> MaybeVect a (S m)
+    inductive (MV Nothing) = MV Nothing
+    inductive (MV (Just (v, xs))) = case xs of
+      [] -> MV Nothing
+      (y : ys) -> MV (Just (VCons y v, ys))
+
+-- AMAZING! It works :D Best thing I ever did at 3:30 in the morning.
+-- Ok, should remember exactly WHY this was needed. Had to explain to GHC
+-- that any Nat value was good for a vectToList for vectors of that length.
+--
+-- Problem: we don't detect lists which are too long! How to remedy this?
+-- Every inductive case has to be the same, so we can't detect it. Better
+-- to work top-down: detect at base case.
+
+listToVect'' :: IsNat n => [a] -> MaybeVect a n
+listToVect'' xs = induction base inductive
+  where
+    base :: MaybeVect a Z
+    base 
+
 read
   :: forall a k manifest u l .
      ( Manifest manifest
@@ -54,6 +173,7 @@ read
      , ManifestKey k
      , ManifestValue (ManifestibleValue a)
      , l ~ ManifestValueLength (ManifestibleValue a)
+     , IsNat l
      )
   => k
   -> u (manifest a)
@@ -92,6 +212,7 @@ write
      , ManifestKey (ManifestibleKey a)
      , ManifestValue (ManifestibleValue a)
      , l ~ ManifestValueLength (ManifestibleValue a)
+     , IsNat l
      )
   => a
   -> u manifest
@@ -164,18 +285,22 @@ class Manifest manifest where
   type PeculiarManifestFailure manifest :: *
 
   manifestRead
-    :: u manifest
-    -> u' l
+    :: ( IsNat n
+       )
+    => u manifest
+    -> u' n
     -> BS.ByteString
-    -> ManifestMonad manifest (Maybe (Vect BS.ByteString l))
+    -> ManifestMonad manifest (Maybe (Vect BS.ByteString n))
   -- ^ Try to read from a Manifest. Nothing indicates not found.
   --   Failure can be expressed by a suitable ManifestMonad.
 
   manifestWrite
-    :: u manifest
-    -> u' l
+    :: ( IsNat n
+       )
+    => u manifest
+    -> u' n
     -> BS.ByteString
-    -> Vect BS.ByteString l
+    -> Vect BS.ByteString n
     -> ManifestMonad manifest ()
   -- ^ Try to write to a Manifest.
   --   Failure can be expressed by a suitable ManifestMonad.
