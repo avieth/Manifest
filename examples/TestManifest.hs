@@ -5,7 +5,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DataKinds #-}
 
-import Prelude hiding (read)
 import qualified Data.ByteString as BS
 import Data.List (find)
 import Control.Monad.Trans.State
@@ -103,17 +102,17 @@ main = do
   let tmSaltedDigest = emptyTM
   let tmEmail = emptyTM
   let action = do {
-      write alex' (Proxy :: Proxy TestManifest);
-      write john' (Proxy :: Proxy TestManifest);
-      read alex (Proxy :: Proxy (TestManifest (WithSaltedDigest User)));
+      mput alex'  (Proxy :: Proxy TestManifest);
+      mput john'  (Proxy :: Proxy TestManifest);
+      mget alex (Proxy :: Proxy (TestManifest (WithSaltedDigest User)));
     }
-  let action2 = read john (Proxy :: Proxy (TestManifest (WithSaltedDigest User)))
+  --let action2 = read john (Proxy :: Proxy (TestManifest (WithSaltedDigest User)))
   (Right x, tmSaltedDigest') <- manifest tmSaltedDigest action
-  (Right y, _) <- manifest tmSaltedDigest' action2
-  (Right z, _) <- manifest tmSaltedDigest' action2
+  --(Right y, _) <- manifest tmSaltedDigest' action2
+  --(Right z, _) <- manifest tmSaltedDigest' action2
   print x
-  print y
-  print z
+  --print y
+  --print z
 {-
   (Right x, _) <- manifest tmEmail $ do
     write alex'

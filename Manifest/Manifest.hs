@@ -5,12 +5,11 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE Rank2Types #-}
 
 module Manifest.Manifest (
 
-    read
-  , write
+    mget
+  , mput
   , manifest
 
   , ManifestRead
@@ -30,7 +29,6 @@ module Manifest.Manifest (
 
   ) where
 
-import Prelude hiding (read)
 import qualified Data.ByteString as BS
 import Control.RichConditional
 import Control.Monad
@@ -40,7 +38,7 @@ import Control.Monad.Trans.Class
 import Data.Proxy
 import Data.TypeNat.Vect
 
-read
+mget
   :: forall a k manifest u l .
      ( Manifest manifest
      , Monad (ManifestMonad manifest)
@@ -55,7 +53,7 @@ read
   -> u (manifest a)
   -- ^ Need a proxy to fix the manifest and value types.
   -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
-read key _ = do
+mget key _ = do
     maybeBytestrings <- lift $ manifestRead (Proxy :: Proxy manifest) (Proxy :: Proxy l) bkey
     inCase maybeBytestrings found notFound
 
@@ -80,7 +78,7 @@ read key _ = do
     readNotOK :: ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
     readNotOK = throwE ReadFailure
 
-write
+mput
   :: forall a manifest u l .
      ( Manifest manifest
      , Monad (ManifestMonad manifest)
@@ -94,7 +92,7 @@ write
   -> u manifest
   -- ^ Need a proxy to fix the manifest type.
   -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestWrite (manifest a) a)
-write x _ = do
+mput x _ = do
     () <- lift $ manifestWrite (Proxy :: Proxy manifest) (Proxy :: Proxy l) bkey bvalue
     return $ Written x
 
@@ -117,19 +115,6 @@ manifest m term = do
       Right outcome' -> case outcome' of
         Left generalFailure -> return (Left (GeneralFailure generalFailure), m')
         Right x -> return (Right x, m')
-
-  {-
-    ifElse outcome (ifPeculiarFailure m') (ifNoPeculiarFailure m')
-
-  where
-
-    ifGeneralFailure :: GeneralManifestFailure -> IO (Either (ManifestFailure manifest) (a, manifest a))
-    --ifGeneralFailure = GeneralFailure
-    ifGeneralFailure = undefined
-
-    ifNoGeneralFailure :: Either (PeculiarManifestFailure manifest) (a, manifest a) -> IO (Either (ManifestFailure manifest) (a, manifest a))
-    ifNoGeneralFailure = undefined
-  -}
 
 -- | Witness that some value was read from some Manifest.
 data ManifestRead manifest a = Found a | NotFound
@@ -180,6 +165,13 @@ class Manifest manifest where
     -> ManifestMonad manifest ()
   -- ^ Try to write to a Manifest.
   --   Failure can be expressed by a suitable ManifestMonad.
+
+  manifestDelete
+    :: (
+       )
+    => u manifest
+    -> BS.ByteString
+    -> ManifestMonad manifest ()
 
   manifestRun
     :: manifest a
