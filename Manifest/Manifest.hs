@@ -101,6 +101,7 @@ mput x _ = do
     bkey = manifestibleKeyDump (manifestibleKey x)
     bvalue = manifestibleValueDump (manifestibleValue x)
 
+-- | Run a manifest term (such as mput, mget, or any sequencing of these).
 manifest
   :: ( Manifest manifest
      , Monad (ManifestMonad manifest)
@@ -119,6 +120,11 @@ manifest m term = do
 -- | Witness that some value was read from some Manifest.
 data ManifestRead manifest a = Found a | NotFound
   deriving (Show)
+
+instance PartialIf (ManifestRead manifest a) a where
+  indicate mr = case mr of
+    Found x -> Just x
+    NotFound -> Nothing
 
 -- | Witness that some value was written to some Manifest.
 data ManifestWrite manifest a = Written a
