@@ -1,16 +1,10 @@
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE DataKinds #-}
 
 import qualified Data.ByteString as BS
-import qualified Data.Map as M
-import Control.Applicative
-import Control.Monad.Trans.State
+import Control.Applicative ((<$>))
 import Data.Proxy
-import Data.TypeNat.Vect
 import Manifest.Manifest
 import Manifest.PureManifest
 
