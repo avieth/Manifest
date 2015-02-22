@@ -163,6 +163,11 @@ manifest m term = do
 data ManifestRead manifest a = Found a | NotFound
   deriving (Show)
 
+instance Functor (ManifestRead manifest) where
+  fmap f x = case x of
+    Found y -> Found (f y)
+    NotFound -> NotFound
+
 instance PartialIf (ManifestRead manifest a) a where
   indicate mr = case mr of
     Found x -> Just x
@@ -194,7 +199,7 @@ data ManifestFailure manifest
   --   Manifest may encounter.
   | PeculiarFailure (PeculiarManifestFailure manifest)
 
-instance Show (ManifestFailure manifest) where
+instance (Show (PecualiarManifestFailure manifest) => Show (ManifestFailure manifest) where
   show failure = case failure of
     GeneralFailure _ -> "General failure"
     PeculiarFailure _ -> "Peculiar failure"
