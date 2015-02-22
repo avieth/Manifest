@@ -58,8 +58,8 @@ mget
 mget key _ = do
     outcome <- lift $ manifestRead (Proxy :: Proxy manifest) (Proxy :: Proxy l) bkey
     case outcome of
-      Left () -> return NotFound
-      Right maybeBytestrings -> inCase maybeBytestrings coherent incoherent
+      Left () -> throwE StorageFailure
+      Right maybeBytestrings -> inCase maybeBytestrings ifFound ifNotFound
 
   where
 
@@ -68,13 +68,13 @@ mget key _ = do
     readBytestrings :: Vect BS.ByteString l -> Maybe a
     readBytestrings bss = manifestiblePull (Proxy :: Proxy a) (bkey, bss)
 
-    coherent :: Vect BS.ByteString l -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
-    coherent x =
+    ifFound :: Vect BS.ByteString l -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
+    ifFound x =
       let maybeRead = readBytestrings x
       in  inCase maybeRead readOK readNotOK
 
-    incoherent :: ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
-    incoherent = throwE StorageFailure
+    ifNotFound :: ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
+    ifNotFound = return NotFound
 
     readOK :: a -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
     readOK x = return (Found x)
