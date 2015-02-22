@@ -10,10 +10,12 @@ module Manifest.Manifest (
 
     mget
   , mput
+  , mdel
   , manifest
 
   , ManifestRead
   , ManifestWrite
+  , ManifestDelete
   , ManifestFailure(..)
 
   , Manifest(..)
@@ -101,6 +103,46 @@ mput x _ = do
     bkey = manifestibleKeyDump (manifestibleKey x)
     bvalue = manifestibleValueDump (manifestibleValue x)
 
+mdel
+  :: forall a k manifest u l .
+     ( Manifest manifest
+     , Monad (ManifestMonad manifest)
+     , Manifestible a
+     , k ~ ManifestibleKey a
+     , ManifestKey k
+     , ManifestValue (ManifestibleValue a)
+     , l ~ ManifestValueLength (ManifestibleValue a)
+     , IsNat l
+     )
+  => k
+  -> u (manifest a)
+  -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestDelete (manifest a) a)
+mdel key _ = do
+    maybeBytestrings <- lift $ manifestDelete (Proxy :: Proxy manifest) (Proxy :: Proxy l) bkey
+    inCase maybeBytestrings found notFound
+
+  where
+
+    bkey = manifestibleKeyDump key
+
+    readBytestrings :: Vect BS.ByteString l -> Maybe a
+    readBytestrings bss = manifestiblePull (Proxy :: Proxy a) (bkey, bss)
+
+    found :: Vect BS.ByteString l -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestDelete  (manifest a) a)
+    found x =
+      let maybeRead = readBytestrings x
+      in  inCase maybeRead readOK readNotOK
+
+    notFound :: ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestDelete (manifest a) a)
+    notFound = return NothingToDelete
+
+    readOK :: a -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestDelete (manifest a) a)
+    readOK x = return (Deleted x)
+
+    readNotOK :: ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestDelete (manifest a) a)
+    readNotOK = throwE ReadFailure
+
+
 -- | Run a manifest term (such as mput, mget, or any sequencing of these).
 manifest
   :: ( Manifest manifest
@@ -117,7 +159,7 @@ manifest m term = do
         Left generalFailure -> return (Left (GeneralFailure generalFailure), m')
         Right x -> return (Right x, m')
 
--- | Witness that some value was read from some Manifest.
+-- | Witness that some value was read from some Manifest, or not found.
 data ManifestRead manifest a = Found a | NotFound
   deriving (Show)
 
@@ -130,6 +172,18 @@ instance PartialIf (ManifestRead manifest a) a where
 data ManifestWrite manifest a = Written a
   deriving (Show)
 
+-- | Witness that some value was deleted from a Manifest, or not found.
+data ManifestDelete manifest a = Deleted a | NothingToDelete
+  deriving (Show)
+
+instance PartialIf (ManifestDelete manifest a) a where
+  indicate mr = case mr of
+    Deleted x -> Just x
+    NothingToDelete -> Nothing
+
+-- | Failure reasons which are relevant to any Manifest.
+--   There's just one: could not read the value, meaning its Manifestible
+--   instance is wrong.
 data GeneralManifestFailure = ReadFailure
   deriving (Show)
 
@@ -173,11 +227,15 @@ class Manifest manifest where
   --   Failure can be expressed by a suitable ManifestMonad.
 
   manifestDelete
-    :: (
+    :: ( IsNat n
        )
     => u manifest
+    -> u' n
     -> BS.ByteString
-    -> ManifestMonad manifest ()
+    -> ManifestMonad manifest (Maybe (Vect BS.ByteString n))
+  -- ^ If a thing is deleted successfully, must return the value corresponding
+  --   to the key; otherwise, Nothing (meaning no problems, just that nothing
+  --   was deleted).
 
   manifestRun
     :: manifest a
