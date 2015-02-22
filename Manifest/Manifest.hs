@@ -56,8 +56,10 @@ mget
   -- ^ Need a proxy to fix the manifest and value types.
   -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
 mget key _ = do
-    maybeBytestrings <- lift $ manifestRead (Proxy :: Proxy manifest) (Proxy :: Proxy l) bkey
-    inCase maybeBytestrings found notFound
+    outcome <- lift $ manifestRead (Proxy :: Proxy manifest) (Proxy :: Proxy l) bkey
+    case outcome of
+      Left () -> return NotFound
+      Right maybeBytestrings -> inCase maybeBytestrings coherent incoherent
 
   where
 
@@ -66,13 +68,13 @@ mget key _ = do
     readBytestrings :: Vect BS.ByteString l -> Maybe a
     readBytestrings bss = manifestiblePull (Proxy :: Proxy a) (bkey, bss)
 
-    found :: Vect BS.ByteString l -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
-    found x =
+    coherent :: Vect BS.ByteString l -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
+    coherent x =
       let maybeRead = readBytestrings x
       in  inCase maybeRead readOK readNotOK
 
-    notFound :: ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
-    notFound = return NotFound
+    incoherent :: ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
+    incoherent = throwE StorageFailure
 
     readOK :: a -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
     readOK x = return (Found x)
@@ -118,8 +120,10 @@ mdel
   -> u (manifest a)
   -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestDelete (manifest a) a)
 mdel key _ = do
-    maybeBytestrings <- lift $ manifestDelete (Proxy :: Proxy manifest) (Proxy :: Proxy l) bkey
-    inCase maybeBytestrings found notFound
+    outcome <- lift $ manifestDelete (Proxy :: Proxy manifest) (Proxy :: Proxy l) bkey
+    case outcome of
+      Left () -> throwE StorageFailure
+      Right maybeBytestrings -> inCase maybeBytestrings found notFound
 
   where
 
@@ -187,9 +191,13 @@ instance PartialIf (ManifestDelete manifest a) a where
     NothingToDelete -> Nothing
 
 -- | Failure reasons which are relevant to any Manifest.
---   There's just one: could not read the value, meaning its Manifestible
---   instance is wrong.
-data GeneralManifestFailure = ReadFailure
+data GeneralManifestFailure
+  = ReadFailure
+  -- ^ could not read the value from ManifestKey and ManifestValues, meaning
+  -- its Manifestible instance is wrong.
+  | StorageFailure
+  -- ^ data in storage is malformed; perhaps the wrong amount of data is
+  --   there (expecting Vect a Three but only found 2 fields for instance).
   deriving (Show)
 
 data ManifestFailure manifest
@@ -199,7 +207,7 @@ data ManifestFailure manifest
   --   Manifest may encounter.
   | PeculiarFailure (PeculiarManifestFailure manifest)
 
-instance (Show (PecualiarManifestFailure manifest) => Show (ManifestFailure manifest) where
+instance Show (ManifestFailure manifest) where
   show failure = case failure of
     GeneralFailure _ -> "General failure"
     PeculiarFailure _ -> "Peculiar failure"
@@ -216,9 +224,14 @@ class Manifest manifest where
     => u manifest
     -> u' n
     -> BS.ByteString
-    -> ManifestMonad manifest (Maybe (Vect BS.ByteString n))
-  -- ^ Try to read from a Manifest. Nothing indicates not found.
-  --   Failure can be expressed by a suitable ManifestMonad.
+    -> ManifestMonad manifest (Either () (Maybe (Vect BS.ByteString n)))
+  -- ^ Try to read from a Manifest.
+  --   Three outcomes:
+  --     Key found and with coherent data (Right (Just x))
+  --     Key found with incoherent data (Left ())
+  --     Key not found (Right Nothing)
+  --   Other failures (PeeculiarManifestFailure) can be expressed by a suitable
+  --   ManifestMonad, and picked up by manifestRun
 
   manifestWrite
     :: ( IsNat n
@@ -229,7 +242,8 @@ class Manifest manifest where
     -> Vect BS.ByteString n
     -> ManifestMonad manifest ()
   -- ^ Try to write to a Manifest.
-  --   Failure can be expressed by a suitable ManifestMonad.
+  --   Failures can be expressed by a suitable ManifestMonad, and
+  --   picked up by manifestRun
 
   manifestDelete
     :: ( IsNat n
@@ -237,10 +251,15 @@ class Manifest manifest where
     => u manifest
     -> u' n
     -> BS.ByteString
-    -> ManifestMonad manifest (Maybe (Vect BS.ByteString n))
-  -- ^ If a thing is deleted successfully, must return the value corresponding
-  --   to the key; otherwise, Nothing (meaning no problems, just that nothing
-  --   was deleted).
+    -> ManifestMonad manifest (Either () (Maybe (Vect BS.ByteString n)))
+  -- ^ Try to delete the value corresponding to some key from a manifest.
+  --   Three outcomes (in all cases, key is not present after execution):
+  --     Key found, value recovered, entry deleted (Right (Just x))
+  --     Key found, value not recovered, entry deleted (Left ())
+  --     Key not found (Right Nothing)
+  --   Other failures can be expressed by a suitable ManifestMonad, and
+  --   picked up by manifestRun. If the entry was not actually deleted, then
+  --   a PeculiarManifestFailure must be given!
 
   manifestRun
     :: manifest a
