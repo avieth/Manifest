@@ -4,6 +4,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module Manifest.PureManifest (
 
@@ -29,6 +30,8 @@ emptyPM = PM M.empty
 -- | Our manfiest is pure, so it's not surprising that nothing can go
 --   wrong.
 data PureManifestFailure
+
+deriving instance Show PureManifestFailure
 
 instance Manifest PureManifest where
 
