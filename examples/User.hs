@@ -55,3 +55,11 @@ main = do
   (Right x, emailManifest) <- manifest emailManifest writeem
   (Right y, _) <- manifest emailManifest readem
   print y
+  let deleteem = do {
+      richardsEmail <- mdel richard (Proxy :: Proxy (PureManifest (WithEmail User)));
+      return richardsEmail
+    }
+  (Right z, emailManifest) <- manifest emailManifest deleteem
+  (Right w, _) <- manifest emailManifest readem
+  print z
+  print w
