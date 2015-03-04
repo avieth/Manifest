@@ -6,12 +6,20 @@
 import Control.Applicative
 import Control.Monad.Free
 
+-- Just for an example
+import qualified Data.Map as M
+
+--data ManifestN a b
+--data ManifestI a b
+type ManifestN a b = a -> Maybe b
+
 data PartialFunctionN :: * -> * -> * where
-  PFN :: (a -> Maybe b) -> PartialFunctionN a b
+  PFN :: ManifestN a b -> PartialFunctionN a b
   CPFN :: PartialFunctionN a b -> PartialFunctionN b c -> PartialFunctionN a c
 
 data PartialFunctionI :: * -> * -> * where
-  PFI :: (a -> Maybe b) -> (b -> Maybe a) -> PartialFunctionI a b
+  --PFI :: ManifestI a b -> PartialFunctionI a b
+  PFI :: ManifestN a b -> ManifestN b a -> PartialFunctionI a b
   CPFI :: PartialFunctionI a b -> PartialFunctionI b c -> PartialFunctionI a c
   IPFI :: PartialFunctionI a b -> PartialFunctionI b a
 
@@ -68,7 +76,8 @@ fromPure f = Normal (PFN (fmap Just f))
 fromPureInjective :: (a -> b) -> (b -> a) -> PartialFunction a b
 fromPureInjective f g = Injective (PFI (fmap Just f) (fmap Just g))
 
-
+fromMap :: Ord a => M.Map a b -> PartialFunction a b
+fromMap map = Normal (PFN (\x -> M.lookup x map))
 
 data M' :: * -> * where
   At :: PartialFunction domain range -> domain -> (Maybe range -> t) -> M' t
@@ -95,5 +104,6 @@ at m x = liftF $ At m x id
 example = do
   x <- (fromPure not) `at` False
   y <- (fromPure not) `at` True
-  return $ (||) <$> x <*> y
+  z <- (fromMap (M.fromList [("A",False), ("B",False), ("C",True)])) `at` "B"
+  return $ (&&) <$> x <*> z
 
