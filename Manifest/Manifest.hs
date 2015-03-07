@@ -1,364 +1,76 @@
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE ConstraintKinds #-}
 
 module Manifest.Manifest (
 
-    mget
-  , mput
-  , mdel
-  , manifest
+    Manifest(..)
+  , ManifestRead(..)
+  , ManifestWrite(..)
+  , ManifestInjective(..)
 
-  , ManifestRead
-  , ManifestWrite
-  , ManifestDelete
-  , ManifestFailure(..)
-
-  , Manifest(..)
-
-  , ManifestKey(..)
-  , ManifestValue(..)
-  , Manifestible
-  , ManifestibleKey
-  , ManifestibleValue
-  , manifestibleKey
-  , manifestibleValue
-  , manifestibleFactorization
+  , Access(..)
+  , AccessConstraint
 
   ) where
 
-import qualified Data.ByteString as BS
-import Control.RichConditional
-import Control.Monad
-import Control.Applicative
-import Control.Monad.Trans.Except
-import Control.Monad.Trans.Class
-import Data.Proxy
-import Data.TypeNat.Vect
+import GHC.Exts (Constraint)
+import Manifest.Resource
+import Manifest.FType
 
-mget
-  :: forall a k manifest u l .
-     ( Manifest manifest
-     , Monad (ManifestMonad manifest)
-     , Manifestible a
-     , k ~ ManifestibleKey a
-     , ManifestKey k
-     , ManifestValue (ManifestibleValue a)
-     , l ~ ManifestValueLength (ManifestibleValue a)
-     , IsNat l
-     )
-  => k
-  -> u (manifest a)
-  -- ^ Need a proxy to fix the manifest and value types.
-  -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
-mget key _ = do
-    outcome <- lift $ manifestRead (Proxy :: Proxy manifest) (Proxy :: Proxy l) bkey
-    case outcome of
-      Left () -> throwE StorageFailure
-      Right maybeBytestrings -> inCase maybeBytestrings ifFound ifNotFound
+data Access = ReadOnly | ReadWrite
 
-  where
+type family AccessConstraint m (a :: Access) :: Constraint where
+  AccessConstraint m ReadOnly = ()
+  AccessConstraint m ReadWrite = ManifestWrite m
 
-    bkey = manifestibleKeyDump key
+class Manifest (a :: FType -> Access -> * -> * -> *) where
+  type ManifestResourceDescriptor a :: *
+  resourceDescriptor :: a mtype access domain range -> ManifestResourceDescriptor a
+  -- The actual "low-level" domain and range types can depend upon
+  -- the "high-level" domain and range.
+  type ManifestDomainType a domain range :: *
+  type ManifestRangeType a domain range :: *
+  type ManifestDomainConstraint a domain range :: Constraint
+  type ManifestRangeConstraint a domain range :: Constraint
+  mdomainDump
+    :: ManifestDomainConstraint a domain range
+    => a mtype access domain range
+    -> domain
+    -> ManifestDomainType a domain range
+  mrangePull
+    :: ManifestRangeConstraint a domain range
+    => a mtype access domain range
+    -> ManifestRangeType a domain range
+    -> Maybe range
 
-    readBytestrings :: Vect BS.ByteString l -> Maybe a
-    readBytestrings bss = manifestiblePull (Proxy :: Proxy a) (bkey, bss)
-
-    ifFound :: Vect BS.ByteString l -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
-    ifFound x =
-      let maybeRead = readBytestrings x
-      in  inCase maybeRead readOK readNotOK
-
-    ifNotFound :: ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
-    ifNotFound = return NotFound
-
-    readOK :: a -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
-    readOK x = return (Found x)
-
-    readNotOK :: ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestRead (manifest a) a)
-    readNotOK = throwE ReadFailure
-
-mput
-  :: forall a manifest u l .
-     ( Manifest manifest
-     , Monad (ManifestMonad manifest)
-     , Manifestible a
-     , ManifestKey (ManifestibleKey a)
-     , ManifestValue (ManifestibleValue a)
-     , l ~ ManifestValueLength (ManifestibleValue a)
-     , IsNat l
-     )
-  => a
-  -> u manifest
-  -- ^ Need a proxy to fix the manifest type.
-  -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestWrite (manifest a) a)
-mput x _ = do
-    () <- lift $ manifestWrite (Proxy :: Proxy manifest) (Proxy :: Proxy l) bkey bvalue
-    return $ Written x
-
-  where
-
-    bkey = manifestibleKeyDump (manifestibleKey x)
-    bvalue = manifestibleValueDump (manifestibleValue x)
-
-mdel
-  :: forall a k manifest u l .
-     ( Manifest manifest
-     , Monad (ManifestMonad manifest)
-     , Manifestible a
-     , k ~ ManifestibleKey a
-     , ManifestKey k
-     , ManifestValue (ManifestibleValue a)
-     , l ~ ManifestValueLength (ManifestibleValue a)
-     , IsNat l
-     )
-  => k
-  -> u (manifest a)
-  -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestDelete (manifest a) a)
-mdel key _ = do
-    outcome <- lift $ manifestDelete (Proxy :: Proxy manifest) (Proxy :: Proxy l) bkey
-    case outcome of
-      Left () -> throwE StorageFailure
-      Right maybeBytestrings -> inCase maybeBytestrings found notFound
-
-  where
-
-    bkey = manifestibleKeyDump key
-
-    readBytestrings :: Vect BS.ByteString l -> Maybe a
-    readBytestrings bss = manifestiblePull (Proxy :: Proxy a) (bkey, bss)
-
-    found :: Vect BS.ByteString l -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestDelete  (manifest a) a)
-    found x =
-      let maybeRead = readBytestrings x
-      in  inCase maybeRead readOK readNotOK
-
-    notFound :: ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestDelete (manifest a) a)
-    notFound = return NothingToDelete
-
-    readOK :: a -> ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestDelete (manifest a) a)
-    readOK x = return (Deleted x)
-
-    readNotOK :: ExceptT GeneralManifestFailure (ManifestMonad manifest) (ManifestDelete (manifest a) a)
-    readNotOK = throwE ReadFailure
-
-
--- | Run a manifest term (such as mput, mget, or any sequencing of these).
-manifest
-  :: ( Manifest manifest
-     , Monad (ManifestMonad manifest)
-     )
-  => manifest a
-  -> ExceptT GeneralManifestFailure (ManifestMonad manifest) t
-  -> IO (Either (ManifestFailure manifest) t, manifest a)
-manifest m term = do
-    (outcome, m') <- manifestRun m (runExceptT term)
-    case outcome of
-      Left peculiarFailure -> return (Left (PeculiarFailure peculiarFailure), m')
-      Right outcome' -> case outcome' of
-        Left generalFailure -> return (Left (GeneralFailure generalFailure), m')
-        Right x -> return (Right x, m')
-
--- | Witness that some value was read from some Manifest, or not found.
-data ManifestRead manifest a = Found a | NotFound
-  deriving (Show)
-
-instance Functor (ManifestRead manifest) where
-  fmap f x = case x of
-    Found y -> Found (f y)
-    NotFound -> NotFound
-
-instance PartialIf (ManifestRead manifest a) a where
-  indicate mr = case mr of
-    Found x -> Just x
-    NotFound -> Nothing
-
--- | Witness that some value was written to some Manifest.
-data ManifestWrite manifest a = Written a
-  deriving (Show)
-
--- | Witness that some value was deleted from a Manifest, or not found.
-data ManifestDelete manifest a = Deleted a | NothingToDelete
-  deriving (Show)
-
-instance PartialIf (ManifestDelete manifest a) a where
-  indicate mr = case mr of
-    Deleted x -> Just x
-    NothingToDelete -> Nothing
-
--- | Failure reasons which are relevant to any Manifest.
-data GeneralManifestFailure
-  = ReadFailure
-  -- ^ could not read the value from ManifestKey and ManifestValues, meaning
-  -- its Manifestible instance is wrong.
-  | StorageFailure
-  -- ^ data in storage is malformed; perhaps the wrong amount of data is
-  --   there (expecting Vect a Three but only found 2 fields for instance).
-  deriving (Show)
-
-data ManifestFailure manifest
-  = GeneralFailure GeneralManifestFailure
-  -- ^ Indicates that the data found for some ManifestKey was not
-  --   parsed back into the expected value. It's a failure that EVERY
-  --   Manifest may encounter.
-  | PeculiarFailure (PeculiarManifestFailure manifest)
-
-instance Show (ManifestFailure manifest) where
-  show failure = case failure of
-    GeneralFailure _ -> "General failure"
-    PeculiarFailure _ -> "Peculiar failure"
-
--- | Indicates that some type can be used as a manifest.
-class Manifest manifest where
-
-  type ManifestMonad manifest :: * -> *
-  type PeculiarManifestFailure manifest :: *
-
-  manifestRead
-    :: ( IsNat n
+class Manifest a => ManifestRead a where
+  mget
+    :: (
        )
-    => u manifest
-    -> u' n
-    -> BS.ByteString
-    -> ManifestMonad manifest (Either () (Maybe (Vect BS.ByteString n)))
-  -- ^ Try to read from a Manifest.
-  --   Three outcomes:
-  --     Key found and with coherent data (Right (Just x))
-  --     Key found with incoherent data (Left ())
-  --     Key not found (Right Nothing)
-  --   Other failures (PeeculiarManifestFailure) can be expressed by a suitable
-  --   ManifestMonad, and picked up by manifestRun
+    => a mtype access domain range
+    -> ResourceType (ManifestResourceDescriptor a)
+    -> ManifestDomainType a domain range
+    -> IO (Maybe (ManifestRangeType a domain range))
 
-  manifestWrite
-    :: ( IsNat n
+class Manifest a => ManifestWrite a where
+  mrangeDump
+    :: ManifestRangeConstraint a domain range
+    => a mtype access domain range
+    -> range
+    -> ManifestRangeType a domain range
+  mset
+    :: (
        )
-    => u manifest
-    -> u' n
-    -> BS.ByteString
-    -> Vect BS.ByteString n
-    -> ManifestMonad manifest ()
-  -- ^ Try to write to a Manifest.
-  --   Failures can be expressed by a suitable ManifestMonad, and
-  --   picked up by manifestRun
+    => a mtype ReadWrite domain range
+    -> ResourceType (ManifestResourceDescriptor a)
+    -> ManifestDomainType a domain range
+    -> Maybe (ManifestRangeType a domain range)
+    -> IO ()
 
-  manifestDelete
-    :: ( IsNat n
+class Manifest a => ManifestInjective a where
+  minvert 
+    :: ( mtype ~ FInjective
        )
-    => u manifest
-    -> u' n
-    -> BS.ByteString
-    -> ManifestMonad manifest (Either () (Maybe (Vect BS.ByteString n)))
-  -- ^ Try to delete the value corresponding to some key from a manifest.
-  --   Three outcomes (in all cases, key is not present after execution):
-  --     Key found, value recovered, entry deleted (Right (Just x))
-  --     Key found, value not recovered, entry deleted (Left ())
-  --     Key not found (Right Nothing)
-  --   Other failures can be expressed by a suitable ManifestMonad, and
-  --   picked up by manifestRun. If the entry was not actually deleted, then
-  --   a PeculiarManifestFailure must be given!
-
-  manifestRun
-    :: manifest a
-    -> ManifestMonad manifest t
-    -> IO (Either (PeculiarManifestFailure manifest) t, manifest a)
-  -- ^ Run a manifest computation under a given manifest. This is the point
-  --   at which a particular Manifest value comes into play and gives
-  --   meaning to the Manifest term (read and write call).
-  --   Must be exception safe! If a Right is given, then everything went
-  --   OK.
-
--- | Indicate that values of some type can be used as keys into a Manifest.
---   This is just serialization and deserialization to and from ByteString.
-class ManifestKey k where
-  manifestibleKeyDump :: k -> BS.ByteString
-  manifestibleKeyPull :: BS.ByteString -> Maybe k
-  -- ^ Must have that
-  --
-  --     manifestibleKeyPull . manifestibleKeyDump = Just
-
--- | Indicate that values of some type can be used as values in a Manifest.
---   This is just serialization and deserialization to and from list of
---   ByteStrings.
-class ManifestValue v where
-  type ManifestValueLength v :: Nat
-  manifestibleValueDump :: v -> Vect BS.ByteString (ManifestValueLength v)
-  manifestibleValuePull :: Vect BS.ByteString (ManifestValueLength v) -> Maybe v
-  -- ^ Must have that
-  --
-  --     manifestibleValuePull . manifestibleValueDump = Just
-
-instance ManifestKey BS.ByteString where
-  manifestibleKeyDump = id
-  manifestibleKeyPull = Just
-
-instance ManifestValue BS.ByteString where
-  type ManifestValueLength BS.ByteString = S Z
-  manifestibleValueDump bs = VCons bs VNil
-  manifestibleValuePull bss = case bss of
-    VCons bs VNil -> Just bs
-    _ -> Nothing
-
--- | A value which can be used with a Manifest.
---   It must factor into a key and value, as determined by the type functions
---     ManifestibleKey
---     ManifestibleValue
---   An instance declares that any value of type ManifestibleKey a, which is
---   itself a ManifestKey instance, can be used to read and write values of
---   type a into and out of some Manifest.
---
---   TBD seems right to demand hat a have an Eq and that
---
---     x :: a == y :: a <=> manifestibleKey x = manifestibleKey y
-class Manifestible a where
-
-  type ManifestibleKey a :: *
-  type ManifestibleValue a :: *
-
-  manifestibleKey :: a -> ManifestibleKey a
-  manifestibleValue :: a -> ManifestibleValue a
-  manifestibleFactorization :: ManifestibleKey a -> ManifestibleValue a -> a
-  -- ^ Show that the type a really does factor into the two types given.
-  --   Must have that
-  --
-  --     manifestibleFactorization (manifestibleKey x) (manifestibleValue x) = x
-
-  manifestiblePull
-    :: ( ManifestKey (ManifestibleKey a)
-       , ManifestValue (ManifestibleValue a)
-       )
-    => u a
-    -> (BS.ByteString, Vect BS.ByteString (ManifestValueLength (ManifestibleValue a)))
-    -> Maybe a
-  manifestiblePull proxy (k, v) =
-        manifestibleFactorization
-    <$> manifestibleKeyPull k
-    <*> manifestibleValuePull v
-
-  manifestibleDump
-    :: ( ManifestKey (ManifestibleKey a)
-       , ManifestValue (ManifestibleValue a)
-       )
-    => a
-    -> (BS.ByteString, Vect BS.ByteString (ManifestValueLength (ManifestibleValue a)))
-  manifestibleDump x =
-    let mkey = manifestibleKey x
-        mval = manifestibleValue x
-    in  ( manifestibleKeyDump mkey
-        , manifestibleValueDump mval
-        )
-
-  -- Theorem:
-  --   manifestiblePull . manifestibleDump = Just
-  --
-  -- Proof:
-  --     manifestiblePull (manifestibleDump x)
-  --   = manifestiblePull (manifestibleKeyDump Proxy (manifestibleKey x), manifestibleValueDump Proxy (manifestibleValue x))
-  --   = manifestibleFactorization <$> Just (manifestibleKey x) <*> Just (manifestibleValue x)
-  --   = x
-  --
-  -- Obviously, this relies on a correct implementation of the class methods,
-  -- which obeys the asserted laws.
+    => a mtype access domain range
+    -> a mtype access range domain
