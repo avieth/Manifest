@@ -27,6 +27,7 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.State
 import Control.Monad.Free
 import Data.Functor.Identity
+import Control.Concurrent.Async
 import qualified Data.DependentMap as DM
 import Manifest.Manifest
 import Manifest.FType
@@ -270,3 +271,179 @@ runM term = iterM run term >>= finalize
       MPure action -> action
       MAt pf x nextAction -> runPFGet pf x >>= nextAction
       MAssign pf x y next -> runPFSet pf x y >> next
+
+-- Moving forward...
+--
+-- Given that we would like to use backends like Redis and MongoDB, backends
+-- which do not have the usual ACID transaction mechanisms that we love, it's
+-- necessary to do some Haskell-side magic. The plan is to compile M terms
+-- in such a way that all writes happen at the end of execution, immediately
+-- before the resource is closed (with no reads happening after any write).
+-- Reads, on the other hand, will be either
+--   1. cached by read, in case the value has already been read
+--   2. cached by write, in case the point being read was written in this M
+--      term.
+--   3. immediately fetched, in case the value is not cached.
+-- Note that any M term can be rewritten to have no cached reads or writes, but
+-- maintain the same meaning.
+--
+-- Hm, this may be a lost cause, since the points might not have Eq or Ord
+-- instances... ah but it would be reasonable to demand that the underlying
+-- transport type (ByteString or Text probably) does! So we can test on those:
+-- the same resource descriptor at the same transport value means the same
+-- output value.
+--
+-- Another option, besides caching, might be to rewrite the M terms so that
+-- they are in a kind of M-normal form, in which there are no reads which
+-- could be cached, and all writes appear at the end. This wouldn't be so
+-- straightforward, given that we can have long sequences of composed
+-- PartialFunction values... or maybe it would be easy?
+--
+--   - First, "desugar" all reads into a sequence of "atomic reads" on
+--     actual manifests (mget calls).
+--   - Now analyze the desugared term. If it's an `assign` then move it to the
+--     end of the term, remembering what was assigned to the resource at the
+--     given point.
+--   - If it's a read, check whether it's been assigned in this term.
+--     If it has, replace it with the value which was assigned.
+--     Otherwise, actually get the value.
+--
+-- And hey while we're at it, we can introduce concurrency, no? 
+-- Is it possible to introduce concurrency? We don't know, given a M term, what
+-- the next term is until we run it! We'll have to change the M term so that
+-- everything is there statically... but we can't. We would have to introduce
+-- a symbolic representation of actual Haskell... or just do the "compilation"
+-- phase on-line! No, that still won't allow it; by the very definition of M,
+-- we need to run each mget and mset in sequence! Ah, not quite true; the
+-- mset terms are statically known, so we can indeed grab them and defer
+-- them. But could we define M in such a way that concurrency is recovered
+-- easily? 
+-- Perhaps the best option is to just give an explicit Applicative instance
+-- and wait for ApplicativeDo.
+--
+-- Or, what if instead of
+--   Maybe range -> t
+-- we have
+--   Concurrently (Maybe range) -> Concurrently t
+-- and then whenever we actually use the thing we `wait` for it.
+-- Yeah, could work! Must replace the domain value in `MAt` with an
+-- Async, though, am I right? Then when we runM, we wait for the
+-- domain, use it to produce the range Async, and then pass it in order to
+-- get the next one!
+-- So the M terms would deal exclusively with Async things.
+--   MPure wraps the value in an Async
+--   MAt takes an domain and a continuation with an
+--     Async (Maybe range) domain type and Async t range type
+--   MAssign takes domain, Maybe Range, t
+-- We only force the Async's ... when?
+--
+--
+--
+
+data M2' f t where
+  M2Pure :: t -> M2' f t
+  M2At
+    :: (
+       )
+    => PartialFunction mtype access domain range
+    -> domain
+    -> (f (Maybe range) -> f t)
+    -> M2' f t
+  M2Assign
+    :: (
+       )
+    => PartialFunction mtype ReadWrite domain range
+    -> domain
+    -> Maybe range
+    -> t
+    -> M2' f t
+
+instance Functor f => Functor (M2' f) where
+  fmap f m' = case m' of
+    M2Pure x -> M2Pure $ f x
+    M2At manifest x g -> M2At manifest x ((fmap . fmap) f g)
+    M2Assign manifest x y next -> M2Assign manifest x y (f next)
+
+type M2 f = Free (M2' f)
+
+at2 :: Functor f => PartialFunction mtype access domain range -> domain -> M2 f (Maybe range)
+at2 pf x = liftF (M2At pf x id)
+
+-- | Convenient for feeding results of `at`s to other `at`s; no need to
+--   pattern match on the Maybe; we do it for you.
+at_2 :: Functor f => PartialFunction mtype access domain range -> Maybe domain -> M2 f (Maybe range)
+at_2 pf x = case x of
+  Just x' -> at2 pf x'
+  Nothing -> return Nothing
+
+assign2 :: Functor f => PartialFunction mtype ReadWrite domain range -> domain -> Maybe range -> M2 f ()
+assign2 pf x y = liftF (M2Assign pf x y ())
+
+-- Example case:
+--
+--   do x <- func1 `at` 0
+--      y <- func2 `at` 1
+--      return $ (+) <$> x <*> y
+--
+-- the two `at`s should run concurrently. How?
+-- This is the actual structure:
+--
+--   M2At func1 0 (\x -> M2At func2 1 (\y -> M2Pure $ (+) <$> x <*> y))
+--
+-- Since we don't actually use x or y until the last term, we should not
+-- demand them until we reach that point (but we should be sure to evaluate
+-- them in full when we do reach that point, to avoid any lazy I/O).
+--
+-- Three cases in which we must force a result:
+--   1. It's used as input to a get
+--   2. It's used as input to a set (domain or range)
+--   3. It's used in a pure function.
+-- How could we possibly do this in a transparent way?
+--
+--
+
+runConc :: M2' Concurrently (IO a) -> IO a
+runConc m = case m of
+    M2Pure x -> x
+    M2At pf x next -> let rangeConcurrent = _
+                      in  next rangeConcurrent
+    M2Assign pf x y next -> next >> runPFSet' pf x y
+
+runPFSet' = undefined
+
+-- | The "target language" of M terms.
+--   Describes, independently, a list of reads and writes which must be
+--   performed.
+--   Hm, maybe this hurts more than it helps. This is just a desugaring
+--   of PartialFunctions into a bunch of manifest reads and writes, but
+--   still must have the complexity of a monad (dependencies between terms
+--   remain).
+{-
+data CoreM a = 
+
+runM2 :: Functor f => M2 f a -> f (CoreM a)
+runM2 term = iterM run term
+
+  where
+
+    run
+      :: ( Functor f
+         )
+      => M2' f (CoreM f a)
+      -> CoreM f a
+    run m = case m of
+      M2Pure corem -> corem
+      M2At pf x next -> coreAt x 
+      M2Assign pf x y next -> fmap (coreAssign x y) next
+
+coreAssign = undefined
+
+coreAt = undefined
+-}
+--
+-- Should we allow arbitrary IO in our M terms? Should M be MonadIO???? Nah,
+-- let's leave that out for now. The Manifest IO should be all you need.
+--
+-- Also: a non-terminating M term is useless; could we somehow rule this out?
+-- Not in Haskell I think.
+--
