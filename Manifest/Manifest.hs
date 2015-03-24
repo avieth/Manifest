@@ -18,6 +18,8 @@ module Manifest.Manifest (
   ) where
 
 import GHC.Exts (Constraint)
+import Data.Typeable
+import Control.Exception
 import Control.Monad.Trans.Except
 import Manifest.ManifestException
 import Manifest.Resource
@@ -60,7 +62,7 @@ class Manifest a => ManifestRead a where
     => a mtype access domain range
     -> ResourceType (ManifestResourceDescriptor a)
     -> ManifestDomainType a domain range
-    -> ExceptT ManifestException IO (Maybe (ManifestRangeType a domain range))
+    -> ExceptT SomeException IO (Maybe (ManifestRangeType a domain range))
 
 class Manifest a => ManifestWrite a where
   mrangeDump
@@ -75,7 +77,7 @@ class Manifest a => ManifestWrite a where
     -> ResourceType (ManifestResourceDescriptor a)
     -> ManifestDomainType a domain range
     -> Maybe (ManifestRangeType a domain range)
-    -> ExceptT ManifestException IO ()
+    -> ExceptT SomeException IO ()
 
 class Manifest a => ManifestInjective a where
   minvert 
