@@ -3,11 +3,13 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 
 module Manifest.PartialFunction (
 
-    PartialFunction
+    PartialFunction(..)
+  , PartialFunctionN(..)
+  , PartialFunctionI(..)
+
   , function
   , injection
   , compose
@@ -20,14 +22,6 @@ module Manifest.PartialFunction (
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.IO.Class
-import Control.Monad.Trans.State
-import Control.Monad.Free
-import Data.Proxy
-import Data.Traversable
-import Data.Functor.Identity
-import Control.Concurrent.Async
-import qualified Data.DependentMap as DM
 import Manifest.Manifest
 import Manifest.FType
 import Manifest.Resource
@@ -135,6 +129,48 @@ pfInvert pf = case pf of
   CPFI pfA pfB -> CPFI (pfInvert pfB) (pfInvert pfA)
   IPFI pf' -> pf'
 
+-- Notice how the function signatures look almost exactly like the signatures
+-- of the consturctors MFAt and MFAssign.
+-- We don't unroll the f around the arguments (like Maybe domain in runAt)
+-- because that would demand using a bind in the M2At clause of runM2, but
+-- I suspect that may be too strict. Leaving them there, we offer more
+-- flexibility to the f definition: maybe it wants to fork and get the
+-- domain value in another thread, for instance.
+class (Functor f, Applicative f, Monad f) => PFStrategy f where
+  runAt
+    :: u f
+    -> PartialFunction mtype access domain range
+    -> f (Maybe domain)
+    -> f (Maybe range)
+  runAssign
+    :: u f
+    -> PartialFunction mtype ReadWrite domain range
+    -> f (Maybe domain)
+    -> f (Maybe range)
+    -> f ()
+
+newtype StupidStrategy a = StupidStrategy {
+    unStupidStrategy :: IO a
+  }
+
+instance Functor StupidStrategy where
+  fmap f (StupidStrategy ix) = StupidStrategy $ fmap f ix
+
+instance Applicative StupidStrategy where
+  pure x = StupidStrategy $ pure x
+  f <*> x = StupidStrategy $ unStupidStrategy f <*> unStupidStrategy x
+
+instance Monad StupidStrategy where
+  return x = StupidStrategy $ return x
+  x >>= k = StupidStrategy $ unStupidStrategy x >>= unStupidStrategy . k
+
+instance PFStrategy StupidStrategy where
+  runAt _ pf (StupidStrategy ix) = StupidStrategy (putStrLn "runAt") >> return undefined
+  runAssign _ pf (StupidStrategy ix) (StupidStrategy iy) = StupidStrategy $ putStrLn "runAssign"
+
+
+
+{-
 runGet
   :: ( ManifestRead manifest
      , ResourceDescriptor (ManifestResourceDescriptor manifest)
@@ -211,48 +247,5 @@ runPFSet pf x y = case pf of
   Injective (PFI manifest) -> runSet manifest x y
   Injective (IPFI pf') -> runPFSet (Injective $ pfInvert pf') x y
   -- Other cases ruled out by Access type.
+-}
 
--- These are the (only) terms which will actually force evaluation of
--- f-terms (eventually, once they themselves are run).
--- Each one will also fire off a thread, with a shared TVar for resources
--- and cache. Indeed, f will have to be specialized to something containing
--- our DependentMap as state.
---
--- Notice how the function signatures look almost exactly like the signatures
--- of the consturctors M2At and M2Assign.
--- We don't unroll the f around the arguments (like Maybe domain in runAt)
--- because that would demand using a bind in the M2At clause of runM2, but
--- I suspect that may be too strict. Leaving them there, we offer more
--- flexibility to the f definition: maybe it wants to fork and get the
--- domain value in another thread, for instance.
-class (Functor f, Applicative f, Monad f) => PFStrategy f where
-  runAt
-    :: u f
-    -> PartialFunction mtype access domain range
-    -> f (Maybe domain)
-    -> f (Maybe range)
-  runAssign
-    :: u f
-    -> PartialFunction mtype ReadWrite domain range
-    -> f (Maybe domain)
-    -> f (Maybe range)
-    -> f ()
-
-newtype StupidStrategy a = StupidStrategy {
-    unStupidStrategy :: IO a
-  }
-
-instance Functor StupidStrategy where
-  fmap f (StupidStrategy ix) = StupidStrategy $ fmap f ix
-
-instance Applicative StupidStrategy where
-  pure x = StupidStrategy $ pure x
-  f <*> x = StupidStrategy $ unStupidStrategy f <*> unStupidStrategy x
-
-instance Monad StupidStrategy where
-  return x = StupidStrategy $ return x
-  x >>= k = StupidStrategy $ unStupidStrategy x >>= unStupidStrategy . k
-
-instance PFStrategy StupidStrategy where
-  runAt _ pf (StupidStrategy ix) = StupidStrategy (putStrLn "runAt") >> return undefined
-  runAssign _ pf (StupidStrategy ix) (StupidStrategy iy) = StupidStrategy $ putStrLn "runAssign"
