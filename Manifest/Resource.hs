@@ -1,5 +1,7 @@
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 
 module Manifest.Resource (
 
@@ -28,8 +30,10 @@ module Manifest.Resource (
 
 import qualified Data.DependentMap as DM
 import Control.Monad.Trans.Except
+import Control.Exception
 import Data.Functor.Identity
 import Data.Typeable
+import Manifest.ManifestException
 
 type RollbackEffect r = r -> IO ()
 type CommitEffect r = r -> IO ()
@@ -57,7 +61,14 @@ rollback (Resource r _ rb _) = rb r
 release :: Resource r -> IO ()
 release (Resource r _ _ rel) = rel r
 
-data ResourceAcquisitionException
+data ResourceAcquisitionException where
+  ResourceAcquisitionException :: ResourceAcquisitionException
+
+deriving instance Typeable ResourceAcquisitionException
+deriving instance Show ResourceAcquisitionException
+instance Exception ResourceAcquisitionException where
+  toException = manifestExceptionToException
+  fromException = manifestExceptionFromException
 
 -- | A ResourceDescriptor determines a kind of resource, and describes how
 --   to produce one.
