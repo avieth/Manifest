@@ -6,9 +6,7 @@
 
 module Manifest.PartialFunction (
 
-    PartialFunction(..)
-  , PartialFunctionN(..)
-  , PartialFunctionI(..)
+    PartialFunction
 
   , function
   , injection
@@ -17,6 +15,9 @@ module Manifest.PartialFunction (
   , invert
 
   , PFStrategy(..)
+
+  , runAt
+  , runAssign
 
   ) where
 
@@ -137,17 +138,61 @@ pfInvert pf = case pf of
 -- flexibility to the f definition: maybe it wants to fork and get the
 -- domain value in another thread, for instance.
 class (Functor f, Applicative f, Monad f) => PFStrategy f where
-  runAt
-    :: u f
-    -> PartialFunction mtype access domain range
+
+  runGet
+    :: ( ManifestRead manifest
+       , ResourceDescriptor (ManifestResourceDescriptor manifest)
+       , ManifestDomainConstraint manifest domain range
+       , ManifestRangeConstraint manifest domain range
+       )
+    => manifest mtype access domain range
     -> f (Maybe domain)
     -> f (Maybe range)
-  runAssign
-    :: u f
-    -> PartialFunction mtype ReadWrite domain range
+
+  runSet
+    :: ( ManifestWrite manifest
+       , ResourceDescriptor (ManifestResourceDescriptor manifest)
+       , ManifestDomainConstraint manifest domain range
+       , ManifestRangeConstraint manifest domain range
+       )
+    => manifest mtype ReadWrite domain range
     -> f (Maybe domain)
     -> f (Maybe range)
     -> f ()
+
+runAt
+  :: ( PFStrategy f
+     )
+  => PartialFunction mtype access domain range
+  -> f (Maybe domain)
+  -> f (Maybe range)
+runAt pf x = case pf of
+  Normal (PFN manifest) -> runGet manifest x
+  Injective (PFI manifest) -> runGet manifest x
+  Normal (CPFN pfA pfB) -> do
+    y <- runAt (Normal pfA) x
+    case y of
+      Nothing -> return Nothing
+      Just y' -> runAt (Normal pfB) (return $ Just y')
+  Injective (CPFI pfA pfB) -> do
+    y <- runAt (Injective pfA) x
+    case y of
+      Nothing -> return Nothing
+      Just y' -> runAt (Injective pfB) (return $ Just y')
+  Injective (IPFI pfA) -> runAt (Injective $ pfInvert pfA) x
+
+runAssign
+  :: ( PFStrategy f
+     )
+  => PartialFunction mtype ReadWrite domain range
+  -> f (Maybe domain)
+  -> f (Maybe range)
+  -> f ()
+runAssign pf x y = case pf of
+  Normal (PFN manifest) -> runSet manifest x y
+  Injective (PFI manifest) -> runSet manifest x y
+  Injective (IPFI pf') -> runAssign (Injective $ pfInvert pf') x y
+  -- Other cases ruled out by Access type.
 
 newtype StupidStrategy a = StupidStrategy {
     unStupidStrategy :: IO a
@@ -165,9 +210,8 @@ instance Monad StupidStrategy where
   x >>= k = StupidStrategy $ unStupidStrategy x >>= unStupidStrategy . k
 
 instance PFStrategy StupidStrategy where
-  runAt _ pf (StupidStrategy ix) = StupidStrategy (putStrLn "runAt") >> return undefined
-  runAssign _ pf (StupidStrategy ix) (StupidStrategy iy) = StupidStrategy $ putStrLn "runAssign"
-
+  runGet m (StupidStrategy ix) = StupidStrategy (putStrLn "runAt") >> return undefined
+  runSet m (StupidStrategy ix) (StupidStrategy iy) = StupidStrategy $ putStrLn "runAssign"
 
 
 {-
@@ -214,38 +258,5 @@ runSet manifest x y = do
     let y' = mrangeDump manifest <$> y
     liftIO $ mset manifest (resource rsrc) (mdomainDump manifest x) y'
 
-runPFGet
-  :: (
-     )
-  => PartialFunction mtype access domain range
-  -> domain
-  -> StateT (DM.DependentMap DResourceMap DResourceKey Resource) IO (Maybe range)
-runPFGet pf x = case pf of
-  Normal (PFN manifest) -> runGet manifest x
-  Injective (PFI manifest) -> runGet manifest x
-  Normal (CPFN pfA pfB) -> do
-    y <- runPFGet (Normal pfA) x
-    case y of
-      Nothing -> return Nothing
-      Just y' -> runPFGet (Normal pfB) y'
-  Injective (CPFI pfA pfB) -> do
-    y <- runPFGet (Injective pfA) x
-    case y of
-      Nothing -> return Nothing
-      Just y' -> runPFGet (Injective pfB) y'
-  Injective (IPFI pfA) -> runPFGet (Injective $ pfInvert pfA) x
-
-runPFSet
-  :: (
-     )
-  => PartialFunction mtype ReadWrite domain range
-  -> domain
-  -> Maybe range
-  -> StateT (DM.DependentMap DResourceMap DResourceKey Resource) IO ()
-runPFSet pf x y = case pf of
-  Normal (PFN manifest) -> runSet manifest x y
-  Injective (PFI manifest) -> runSet manifest x y
-  Injective (IPFI pf') -> runPFSet (Injective $ pfInvert pf') x y
-  -- Other cases ruled out by Access type.
 -}
 

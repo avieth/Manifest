@@ -141,8 +141,8 @@ runMF
   => MF f (f a)
   -> f a
 runMF term = case term of
-    MAt pf domain next -> next (runAt (Proxy :: Proxy f) pf domain)
-    MAssign pf domain range next -> runAssign (Proxy :: Proxy f) pf domain range *> next
+    MAt pf domain next -> next (runAt pf domain)
+    MAssign pf domain range next -> runAssign pf domain range *> next
     -- Place next on the left so that we do all assignments at the end?!
     -- No, this won't be necessary. It's the job of the f monad to sort that
     -- out.
