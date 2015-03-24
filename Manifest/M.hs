@@ -26,12 +26,10 @@ import Manifest.Manifest
 
 -- | A functor to describe a DSL which we call M, parameterized by another
 --   functor @f.
---   The free monad over M f gives the DSL.
+--   The free monad over MF f gives the DSL.
 data MF f t where
   MAt
-    :: (
-       )
-    => PartialFunction mtype access domain range
+    :: PartialFunction mtype access domain range
     -> f (Maybe domain)
     -- ^ Yes, it has to be Maybe domain.
     --   Might be more natural to absorb the maybe into the f.
@@ -40,20 +38,18 @@ data MF f t where
     -> (f (Maybe range) -> t)
     -> MF f t
   MAssign
-    :: (
-       )
-    => PartialFunction mtype ReadWrite domain range
+    :: PartialFunction mtype ReadWrite domain range
     -> f (Maybe domain)
     -- ^ See note in MAt
     -> f (Maybe range)
     -> t
     -> MF f t
   MInspect
-    :: (
-       )
-    => f a
+    :: f a
     -> (f a -> t)
     -> MF f t
+  -- ^ This constructor allows us to treat arbitrary f-terms as part of
+  --   our DSL.
 
 instance Functor f => Functor (MF f) where
   fmap f m' = case m' of
@@ -97,6 +93,16 @@ infixr 1 .:=
   -> M f ()
 (.:=) = assign
 
+-- | Sometimes you want to switch the M computation based on the value inside
+--   an f. Do that via this.
+inspect
+  :: ( PFStrategy f
+     )
+  => f a
+  -> (a -> M f (f b))
+  -> M f (f b)
+inspect term k = liftF $ MInspect term (\fx -> fx >>= runM . k)
+
 -- | With inspect, we just lift pure computation in through the f, pushing out
 --   another f-wrapped value, so that the DSL user still has to work with
 --   f-terms until the very end.
@@ -109,18 +115,6 @@ inspect_
   -> M f (f b)
 inspect_ term k = liftF (MInspect term (\fx -> fx >>= return . k))
 
--- | Sometimes you want to switch the M computation based on the value inside
---   an f. Do that via this.
-inspect
-  :: ( PFStrategy f
-     )
-  => f a
-  -> (a -> M f (f b))
-  -> M f (f b)
-inspect term k = liftF $ MInspect term (\fx -> fx >>= runM . k)
-
--- I believe this type will have to be specialized, as we cannot evaluate
--- partial functions in an arbitrary monad.
 runMF
   :: forall f a .
      ( PFStrategy f
@@ -130,10 +124,6 @@ runMF
 runMF term = case term of
     MAt pf domain next -> next (runAt pf domain)
     MAssign pf domain range next -> runAssign pf domain range *> next
-    -- Place next on the left so that we do all assignments at the end?!
-    -- No, this won't be necessary. It's the job of the f monad to sort that
-    -- out.
-    --MAssign pf domain range next -> next <* runAssign pf domain range
     MInspect fx next -> next fx
 
 -- | iterM won't suit our needs, because it puts a return in the Pure case:
