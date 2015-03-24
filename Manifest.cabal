@@ -6,7 +6,7 @@ version:             0.1.0.0
 synopsis:            Abstraction for checking persisted data
 -- description:         
 homepage:            https://github.com/avieth/Manifest
-license:             MIT
+license:             BSD3
 license-file:        LICENSE
 author:              Alexander Vieth
 maintainer:          aovieth@gmail.com
