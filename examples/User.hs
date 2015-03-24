@@ -8,20 +8,25 @@ import qualified Data.Text as T
 import Control.Applicative
 import Manifest.Manifest
 import Manifest.FType
-import Manifest.Pure
 import Manifest.M
 import Manifest.PartialFunction
 import Manifest.StupidStrategy
+import Manifest.Pure
+import Manifest.Volatile
 
 data User = User T.Text
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 type Email = T.Text
 
 ada = User "ada"
 richard = User "richard"
+esther = User "esther"
+john = User "john"
 adasEmail = "ada@clare.com"
 richardsEmail = "richard@carstone.com"
+esthersEmail = "esther@summerson.com"
+johnsEmail = "john@jarndynce.com"
 
 userEmails :: PureManifest FInjective ReadOnly User Email
 userEmails = pureInjection forward backward
@@ -41,3 +46,14 @@ example1 = do
     return $ appendThroughMaybe <$> x <*> y
   where
     appendThroughMaybe mx my = (T.append) <$> mx <*> my
+
+example2 :: PFStrategy f => VolatileManifest FNotInjective ReadWrite User Email -> M f (f (Maybe Email))
+example2 userEmailsVolatile = do
+    (function userEmailsVolatile, esther) .:= Just esthersEmail
+    (function userEmailsVolatile, john) .:= Just johnsEmail
+    function userEmailsVolatile `at_` esther
+
+runExample2 = do
+  v <- volatileManifest
+  let x = runM (example2 v) :: StupidStrategy (Maybe Email)
+  runStupidStrategy x
