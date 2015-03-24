@@ -9,7 +9,9 @@ module Manifest.StupidStrategy (
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Trans.Except
+import Control.Exception
 import Manifest.Manifest
+import Manifest.ManifestException
 import Manifest.Resource
 import Manifest.PartialFunction
 
@@ -42,8 +44,9 @@ instance PFStrategy StupidStrategy where
               Nothing -> return Nothing
               Just x' -> do
                     y <- runExceptT (mget m (resource r) x')
+                    release r
                     case y of
-                      Left _ -> error "WTF?"
+                      Left ex -> print (fromException ex :: Maybe ManifestException) >> undefined
                       Right y' -> case mrangePull m <$> y' of
                         Nothing -> return Nothing
                         Just y'' -> return y''
@@ -62,6 +65,7 @@ instance PFStrategy StupidStrategy where
               Nothing -> return ()
               Just x' -> do
                   outcome <- runExceptT (mset m (resource r) x' rangeValue)
+                  release r
                   case outcome of
-                    Left _ -> error "WTF?"
+                    Left ex -> print (fromException ex :: Maybe ManifestException) >> undefined
                     Right () -> return ()
