@@ -1,6 +1,9 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module Manifest.Manifest (
 
@@ -12,25 +15,50 @@ module Manifest.Manifest (
   , Access(..)
   , AccessConstraint
 
-  , ManifestReadException
-  , ManifestWriteException
+  , ManifestException
+  , manifestExceptionFromException
+  , manifestExceptionToException
 
   ) where
 
 import GHC.Exts (Constraint)
+import Data.Typeable
+import Control.Exception
 import Control.Monad.Trans.Except
 import Manifest.Resource
 import Manifest.FType
 
+-- | Description of Manifest accessibility. Some Manifests are not
+--   writeable.
 data Access = ReadOnly | ReadWrite
 
+-- | Association of a constraint to each Manifest, Access constructor pair:
+--   ReadWrite demands that the Manifest is ManifestWrite.
 type family AccessConstraint m (a :: Access) :: Constraint where
   AccessConstraint m ReadOnly = ()
   AccessConstraint m ReadWrite = ManifestWrite m
 
-data ManifestReadException
+-- | Container for any exception raised by a Manifest.
+--   Particular Manifest instances should define particular exceptions, and
+--   make them "subexceptions" of this one in the canonical way: an Exception
+--   instance with
+--     toException = manifestExceptionToException
+--     fromException = manifestExceptionFromException
+data ManifestException where
+  ManifestException :: Exception e => e -> ManifestException
 
-data ManifestWriteException
+deriving instance Typeable ManifestException
+instance Show ManifestException where
+  show (ManifestException x) = show x
+instance Exception ManifestException
+
+manifestExceptionToException :: Exception e => e -> SomeException
+manifestExceptionToException = toException . ManifestException
+
+manifestExceptionFromException :: Exception e => SomeException -> Maybe e
+manifestExceptionFromException x = do
+    ManifestException a <- fromException x
+    cast a
 
 class Manifest (a :: FType -> Access -> * -> * -> *) where
   type ManifestResourceDescriptor a :: *
@@ -59,7 +87,7 @@ class Manifest a => ManifestRead a where
     => a mtype access domain range
     -> ResourceType (ManifestResourceDescriptor a)
     -> ManifestDomainType a domain range
-    -> ExceptT ManifestReadException IO (Maybe (ManifestRangeType a domain range))
+    -> ExceptT ManifestException IO (Maybe (ManifestRangeType a domain range))
 
 class Manifest a => ManifestWrite a where
   mrangeDump
@@ -74,7 +102,7 @@ class Manifest a => ManifestWrite a where
     -> ResourceType (ManifestResourceDescriptor a)
     -> ManifestDomainType a domain range
     -> Maybe (ManifestRangeType a domain range)
-    -> ExceptT ManifestWriteException IO ()
+    -> ExceptT ManifestException IO ()
 
 class Manifest a => ManifestInjective a where
   minvert 
