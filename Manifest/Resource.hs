@@ -6,6 +6,8 @@ module Manifest.Resource (
     Resource(..)
   , ResourceDescriptor(..)
 
+  , ResourceAcquisitionException(..)
+
   , resource
   , commit
   , rollback
@@ -25,6 +27,7 @@ module Manifest.Resource (
   ) where
 
 import qualified Data.DependentMap as DM
+import Control.Monad.Trans.Except
 import Data.Functor.Identity
 import Data.Typeable
 
@@ -54,6 +57,8 @@ rollback (Resource r _ rb _) = rb r
 release :: Resource r -> IO ()
 release (Resource r _ _ rel) = rel r
 
+data ResourceAcquisitionException
+
 -- | A ResourceDescriptor determines a kind of resource, and describes how
 --   to produce one.
 --   We demand Ord because we want the descriptor to uniquely determine a
@@ -64,7 +69,7 @@ release (Resource r _ _ rel) = rel r
 --   Typeable is needed so that we can use it in a dependent map.
 class (Ord rd, Typeable rd) => ResourceDescriptor rd where
   type ResourceType rd :: *
-  acquireResource :: rd -> IO (Resource (ResourceType rd))
+  acquireResource :: rd -> ExceptT ResourceAcquisitionException IO (Resource (ResourceType rd))
 
 type DResourceKey = Identity
 

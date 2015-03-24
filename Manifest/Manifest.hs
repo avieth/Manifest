@@ -12,9 +12,13 @@ module Manifest.Manifest (
   , Access(..)
   , AccessConstraint
 
+  , ManifestReadException
+  , ManifestWriteException
+
   ) where
 
 import GHC.Exts (Constraint)
+import Control.Monad.Trans.Except
 import Manifest.Resource
 import Manifest.FType
 
@@ -23,6 +27,10 @@ data Access = ReadOnly | ReadWrite
 type family AccessConstraint m (a :: Access) :: Constraint where
   AccessConstraint m ReadOnly = ()
   AccessConstraint m ReadWrite = ManifestWrite m
+
+data ManifestReadException
+
+data ManifestWriteException
 
 class Manifest (a :: FType -> Access -> * -> * -> *) where
   type ManifestResourceDescriptor a :: *
@@ -51,7 +59,7 @@ class Manifest a => ManifestRead a where
     => a mtype access domain range
     -> ResourceType (ManifestResourceDescriptor a)
     -> ManifestDomainType a domain range
-    -> IO (Maybe (ManifestRangeType a domain range))
+    -> ExceptT ManifestReadException IO (Maybe (ManifestRangeType a domain range))
 
 class Manifest a => ManifestWrite a where
   mrangeDump
@@ -66,7 +74,7 @@ class Manifest a => ManifestWrite a where
     -> ResourceType (ManifestResourceDescriptor a)
     -> ManifestDomainType a domain range
     -> Maybe (ManifestRangeType a domain range)
-    -> IO ()
+    -> ExceptT ManifestWriteException IO ()
 
 class Manifest a => ManifestInjective a where
   minvert 
