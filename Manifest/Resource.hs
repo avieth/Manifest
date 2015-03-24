@@ -72,13 +72,12 @@ instance Exception ResourceAcquisitionException where
 
 -- | A ResourceDescriptor determines a kind of resource, and describes how
 --   to produce one.
---   We demand Ord because we want the descriptor to uniquely determine a
---   resource and to be able to use descriptors in efficient maps. Two
---   descriptors must be equal if and only if the resources they would
---   produce (via acquireResource) would be observationally identical!
---   The ordering is irrelevant, so long as it's really a total order.
+--   We demand Eq because we want the descriptor to uniquely determine a
+--   resource. Two descriptors must be equal if and only if the resources
+--   they would produce (via acquireResource) would be observationally
+--   identical!
 --   Typeable is needed so that we can use it in a dependent map.
-class (Ord rd, Typeable rd) => ResourceDescriptor rd where
+class (Eq rd, Typeable rd) => ResourceDescriptor rd where
   type ResourceType rd :: *
   acquireResource :: rd -> ExceptT ResourceAcquisitionException IO (Resource (ResourceType rd))
 
