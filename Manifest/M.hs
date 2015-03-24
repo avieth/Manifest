@@ -119,19 +119,6 @@ inspect
   -> M f (f b)
 inspect term k = liftF $ MInspect term (\fx -> fx >>= runM . k)
 
-ex1 :: (PFStrategy f) => M f (f (Maybe ()))
-ex1 = do
-  fx <- at_ undefined True
-  fy <- at_ undefined False
-  inspect fx (\x -> return $ pure x)
-  inspect_ fx (\x -> if True then x else Nothing)
-
-  -- Note that if we replace the last line with this, then both fx and fy
-  -- will factor into the final term; otherwise, only fx does! fy is never
-  -- run!
-  --fx' <- inspect fx (\x -> if True then x else Nothing)
-  --return $ const <$> fx' <*> fy
-
 -- I believe this type will have to be specialized, as we cannot evaluate
 -- partial functions in an arbitrary monad.
 runMF
