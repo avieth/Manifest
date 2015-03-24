@@ -86,12 +86,13 @@ assign pf x y = liftF (MAssign pf x y ())
 infixr 1 .:=
 
 (.:=)
-  :: Functor f
-  => PartialFunction mtype ReadWrite domain range
-  -> f (Maybe domain)
-  -> f (Maybe range)
+  :: ( Applicative f
+     , Functor f
+     )
+  => (PartialFunction mtype ReadWrite domain range, domain)
+  -> Maybe range
   -> M f ()
-(.:=) = assign
+(.:=) (pf, x) y = assign pf (pure $ Just x) (pure y)
 
 -- | Sometimes you want to switch the M computation based on the value inside
 --   an f. Do that via this.
