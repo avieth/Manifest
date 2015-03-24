@@ -194,25 +194,6 @@ runAssign pf x y = case pf of
   Injective (IPFI pf') -> runAssign (Injective $ pfInvert pf') x y
   -- Other cases ruled out by Access type.
 
-newtype StupidStrategy a = StupidStrategy {
-    unStupidStrategy :: IO a
-  }
-
-instance Functor StupidStrategy where
-  fmap f (StupidStrategy ix) = StupidStrategy $ fmap f ix
-
-instance Applicative StupidStrategy where
-  pure x = StupidStrategy $ pure x
-  f <*> x = StupidStrategy $ unStupidStrategy f <*> unStupidStrategy x
-
-instance Monad StupidStrategy where
-  return x = StupidStrategy $ return x
-  x >>= k = StupidStrategy $ unStupidStrategy x >>= unStupidStrategy . k
-
-instance PFStrategy StupidStrategy where
-  runGet m (StupidStrategy ix) = StupidStrategy (putStrLn "runAt") >> return undefined
-  runSet m (StupidStrategy ix) (StupidStrategy iy) = StupidStrategy $ putStrLn "runAssign"
-
 
 {-
 runGet
