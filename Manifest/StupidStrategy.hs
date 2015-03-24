@@ -48,4 +48,20 @@ instance PFStrategy StupidStrategy where
                         Nothing -> return Nothing
                         Just y'' -> return y''
 
-  runSet m (StupidStrategy ix) (StupidStrategy iy) = StupidStrategy $ putStrLn "runAssign"
+  runSet m (StupidStrategy ix) (StupidStrategy iy) = StupidStrategy $ do
+      let rd = resourceDescriptor m
+      resourceWrapper <- runExceptT (acquireResource rd)
+      case resourceWrapper of
+        Left _ -> error "No resource"
+        Right r -> do
+            x <- ix
+            y <- iy
+            let domainValue = mdomainDump m <$> x
+            let rangeValue = mrangeDump m <$> y
+            case domainValue of
+              Nothing -> return ()
+              Just x' -> do
+                  outcome <- runExceptT (mset m (resource r) x' rangeValue)
+                  case outcome of
+                    Left _ -> error "WTF?"
+                    Right () -> return ()
