@@ -1,59 +1,43 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DataKinds #-}
 
 import qualified Data.ByteString as BS
-import Control.Applicative ((<$>))
-import Data.Proxy
+import qualified Data.Text as T
+import Control.Applicative
 import Manifest.Manifest
-import Manifest.PureManifest
+import Manifest.FType
+import Manifest.Pure
+import Manifest.M
+import Manifest.PartialFunction
+import Manifest.StupidStrategy
 
-data User = User BS.ByteString
+data User = User T.Text
   deriving (Show)
 
-type Email = BS.ByteString
-
-data WithEmail a = WithEmail a Email
-  deriving (Show)
-
-email :: WithEmail a -> Email
-email (WithEmail _ x) = x
-
-instance ManifestKey User where
-  manifestibleKeyDump (User b) = b
-  manifestibleKeyPull = Just . User
-
-instance Manifestible (WithEmail a) where
-  type ManifestibleKey (WithEmail a) = a
-  type ManifestibleValue (WithEmail a) = Email
-  manifestibleKey (WithEmail x _) = x
-  manifestibleValue (WithEmail _ x) = x
-  manifestibleFactorization = WithEmail
+type Email = T.Text
 
 ada = User "ada"
 richard = User "richard"
-adaEmail = WithEmail ada "ada@clare.com"
-richardEmail = WithEmail richard "richard@carstone.com"
+adasEmail = "ada@clare.com"
+richardsEmail = "richard@carstone.com"
 
-main = do
-  let emailManifest = emptyPM
-  let writeem = do {
-      mput adaEmail (Proxy :: Proxy PureManifest);
-      mput richardEmail  (Proxy :: Proxy PureManifest);
-    }
-  let readem = do {
-      adasEmail <- mget ada (Proxy :: Proxy (PureManifest (WithEmail User)));
-      richardsEmail <- mget richard (Proxy :: Proxy (PureManifest (WithEmail User)));
-      return (email <$> adasEmail, email <$> richardsEmail)
-    }
-  (Right x, emailManifest) <- manifest emailManifest writeem
-  (Right y, _) <- manifest emailManifest readem
-  print y
-  let deleteem = do {
-      richardsEmail <- mdel richard (Proxy :: Proxy (PureManifest (WithEmail User)));
-      return richardsEmail
-    }
-  (Right z, emailManifest) <- manifest emailManifest deleteem
-  (Right w, _) <- manifest emailManifest readem
-  print z
-  print w
+userEmails :: PureManifest FInjective ReadOnly User Email
+userEmails = pureInjection forward backward
+  where
+    forward user = case user of
+      User "ada" -> Just adasEmail
+      User "richard" -> Just richardsEmail
+      _ -> Nothing
+    backward email = case email of
+      "ada@clare.com" -> Just ada
+      "richard@carstone.com" -> Just richard
+
+example1 :: PFStrategy f => M f (f (Maybe Email))
+example1 = do
+    x <- injection userEmails `at_` ada
+    y <- injection userEmails `at_` richard
+    return $ appendThroughMaybe <$> x <*> y
+  where
+    appendThroughMaybe mx my = (T.append) <$> mx <*> my
