@@ -47,13 +47,13 @@ example1 = do
   where
     appendThroughMaybe mx my = (T.append) <$> mx <*> my
 
-example2 :: PFStrategy f => VolatileManifest FNotInjective ReadWrite User Email -> M f (f (Maybe Email))
+example2 :: PFStrategy f => VolatileManifest FInjective ReadWrite User Email -> M f (f (Maybe Email))
 example2 userEmailsVolatile = do
     (function userEmailsVolatile, esther) .:= Just esthersEmail
-    (function userEmailsVolatile, john) .:= Just johnsEmail
+    (function userEmailsVolatile, john) .:= Just esthersEmail
     function userEmailsVolatile `at_` esther
 
 runExample2 = do
-  v <- volatileManifest
+  v <- volatileManifestInjective
   let x = runM (example2 v) :: StupidStrategy (Maybe Email)
   runStupidStrategy x
