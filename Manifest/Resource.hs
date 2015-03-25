@@ -35,6 +35,7 @@ import Data.Functor.Identity
 import Data.Typeable
 import Manifest.ManifestException
 
+-- TBD do these really need to be functions? Why not just an IO ()?
 type RollbackEffect r = r -> IO ()
 type CommitEffect r = r -> IO ()
 type ReleaseEffect r = r -> IO ()

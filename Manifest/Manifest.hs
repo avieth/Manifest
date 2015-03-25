@@ -36,8 +36,8 @@ type family AccessConstraint m (a :: Access) :: Constraint where
   AccessConstraint m ReadWrite = ManifestWrite m
 
 class Manifest (a :: FType -> Access -> * -> * -> *) where
-  type ManifestResourceDescriptor a :: *
-  resourceDescriptor :: a mtype access domain range -> ManifestResourceDescriptor a
+  type ManifestResourceDescriptor a (ftype :: FType) (access :: Access) domain range :: *
+  resourceDescriptor :: a ftype access domain range -> ManifestResourceDescriptor a ftype access domain range
   -- The actual "low-level" domain and range types can depend upon
   -- the "high-level" domain and range.
   type ManifestDomainType a domain range :: *
@@ -46,12 +46,12 @@ class Manifest (a :: FType -> Access -> * -> * -> *) where
   type ManifestRangeConstraint a domain range :: Constraint
   mdomainDump
     :: ManifestDomainConstraint a domain range
-    => a mtype access domain range
+    => a ftype access domain range
     -> domain
     -> ManifestDomainType a domain range
   mrangePull
     :: ManifestRangeConstraint a domain range
-    => a mtype access domain range
+    => a ftype access domain range
     -> ManifestRangeType a domain range
     -> Maybe range
 
@@ -59,29 +59,29 @@ class Manifest a => ManifestRead a where
   mget
     :: (
        )
-    => a mtype access domain range
-    -> ResourceType (ManifestResourceDescriptor a)
+    => a ftype access domain range
+    -> ResourceType (ManifestResourceDescriptor a ftype access domain range)
     -> ManifestDomainType a domain range
     -> ExceptT SomeException IO (Maybe (ManifestRangeType a domain range))
 
 class Manifest a => ManifestWrite a where
   mrangeDump
     :: ManifestRangeConstraint a domain range
-    => a mtype access domain range
+    => a ftype access domain range
     -> range
     -> ManifestRangeType a domain range
   mset
     :: (
        )
-    => a mtype ReadWrite domain range
-    -> ResourceType (ManifestResourceDescriptor a)
+    => a ftype ReadWrite domain range
+    -> ResourceType (ManifestResourceDescriptor a ftype ReadWrite domain range)
     -> ManifestDomainType a domain range
     -> Maybe (ManifestRangeType a domain range)
     -> ExceptT SomeException IO ()
 
 class Manifest a => ManifestInjective a where
   minvert 
-    :: ( mtype ~ FInjective
+    :: ( ftype ~ FInjective
        )
-    => a mtype access domain range
-    -> a mtype access range domain
+    => a ftype access domain range
+    -> a ftype access range domain
