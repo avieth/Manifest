@@ -28,6 +28,7 @@ import Manifest.FType
 -- | Description of Manifest accessibility. Some Manifests are not
 --   writeable.
 data Access = ReadOnly | ReadWrite
+  deriving (Eq, Typeable)
 
 -- | Association of a constraint to each Manifest, Access constructor pair:
 --   ReadWrite demands that the Manifest is ManifestWrite.

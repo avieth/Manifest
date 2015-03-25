@@ -1,5 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 
 module Manifest.FType (
 
@@ -8,8 +9,11 @@ module Manifest.FType (
 
   ) where
 
+import Data.Typeable
+
 -- | Description of a function: either injective or not injective.
 data FType = FInjective | FNotInjective
+  deriving (Eq, Typeable)
 
 -- | Expresses the fact that the composition f . g is injective iff both
 --   f and g are injective.
