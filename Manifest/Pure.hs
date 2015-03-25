@@ -1,3 +1,13 @@
+{-|
+Module      : Manifest.Pure
+Description : An immutable in-memory Manifest instance.
+Copyright   : (c) Alexander Vieth, 2015
+Licence     : BSD3
+Maintainer  : aovieth@gmail.com
+Stability   : experimental
+Portability : non-portable (GHC only)
+-}
+
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE GADTs #-}
@@ -16,8 +26,11 @@ import Manifest.Manifest
 import Manifest.Resource
 import Manifest.FType
 
+-- | This resource descriptor contains no information, because a PureManifest
+--   doesn't need any information: it's immutable, so committing and rolling
+--   back is trivial.
 data PureDescriptor = PD
-  deriving (Eq, Ord, Typeable)
+  deriving (Eq, Typeable)
 
 instance ResourceDescriptor PureDescriptor where
   type ResourceType PureDescriptor = ()
@@ -27,7 +40,8 @@ instance ResourceDescriptor PureDescriptor where
       rollback _ = return ()
       release _ = return ()
 
-data PureManifest mtype access a b where
+-- | A pure partial function manifest.
+data PureManifest ftype access a b where
   PureManifestN :: (a -> Maybe b) -> PureManifest FNotInjective ReadOnly a b
   PureManifestI :: (a -> Maybe b) -> (b -> Maybe a) -> PureManifest FInjective ReadOnly a b
 
@@ -38,7 +52,7 @@ pureInjection :: (a -> Maybe b) -> (b -> Maybe a) -> PureManifest FInjective Rea
 pureInjection = PureManifestI
 
 instance Manifest PureManifest where
-  type ManifestResourceDescriptor PureManifest = PureDescriptor
+  type ManifestResourceDescriptor PureManifest ftype access domain range = PureDescriptor
   resourceDescriptor _ = PD
   type ManifestDomainType PureManifest domain range = domain
   type ManifestRangeType PureManifest domain range = range
