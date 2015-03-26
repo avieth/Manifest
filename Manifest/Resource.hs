@@ -73,4 +73,4 @@ instance Exception ResourceAcquisitionException where
 --   Typeable is needed so that we can use it in a dependent map.
 class (Eq rd, Typeable rd) => ResourceDescriptor rd where
   type ResourceType rd :: *
-  acquireResource :: rd -> ExceptT SomeException IO (Resource (ResourceType rd))
+  acquireResource :: rd -> IO (Resource (ResourceType rd))

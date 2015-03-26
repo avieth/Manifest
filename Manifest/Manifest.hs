@@ -1,3 +1,13 @@
+{-|
+Module      : Manifest.Manifest
+Description : Definition of Manifest typeclasses
+Copyright   : (c) Alexander Vieth, 2015
+Licence     : BSD3
+Maintainer  : aovieth@gmail.com
+Stability   : experimental
+Portability : non-portable (GHC only)
+-}
+
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ConstraintKinds #-}
@@ -63,7 +73,7 @@ class Manifest a => ManifestRead a where
     => a ftype access domain range
     -> ResourceType (ManifestResourceDescriptor a ftype access domain range)
     -> ManifestDomainType a domain range
-    -> ExceptT SomeException IO (Maybe (ManifestRangeType a domain range))
+    -> IO (Maybe (ManifestRangeType a domain range))
 
 class Manifest a => ManifestWrite a where
   mrangeDump
@@ -78,7 +88,7 @@ class Manifest a => ManifestWrite a where
     -> ResourceType (ManifestResourceDescriptor a ftype ReadWrite domain range)
     -> ManifestDomainType a domain range
     -> Maybe (ManifestRangeType a domain range)
-    -> ExceptT SomeException IO ()
+    -> IO ()
 
 class Manifest a => ManifestInjective a where
   minvert 
