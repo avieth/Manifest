@@ -1,3 +1,13 @@
+{-|
+Module      : Manifest.SQLite
+Description : An SQLite-backed Manifest.
+copyright   : (c) Alexander Vieth, 2015
+Licence     : BSD3
+Maintainer  : aovieth@gmail.com
+Stability   : experimental
+Portability : non-portable (GHC only)
+-}
+
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -43,37 +53,14 @@ data SQLiteDescriptor = SQLD String
 instance ResourceDescriptor SQLiteDescriptor where
   type ResourceType SQLiteDescriptor = Connection
   acquireResource (SQLD str) = do
-      conn <- safeOpen str
-      safeBeginTransaction conn
-      return $ Resource conn safeCommit safeRollback release
+      conn <- open str
+      beginTransaction conn
+      return $ Resource conn commit rollback release
     where
-      safeOpen str = do
-          outcome <- liftIO $ try (open str)
-          -- TODO I don't want to catch all exceptions, but what can I do? I
-          -- don't know what exception open might raise.
-          case outcome :: Either SomeException Connection of
-            Left exception -> mthrow exception
-            Right conn -> return conn
-      safeBeginTransaction conn = do
-          outcome <- liftIO $ try (execute_ conn "BEGIN TRANSACTION")
-          case outcome :: Either SomeException () of
-            Left exception -> mthrow exception
-            Right _ -> return ()
-      safeRollback conn = do
-          outcome <- try (execute_ conn "ROLLBACK TRANSACTION")
-          case outcome :: Either SomeException () of
-            Left exception -> error "Exception in rollback... curious."
-            Right _ -> return ()
-      safeCommit conn = do
-          outcome <- try (execute_ conn "COMMIT TRANSACTION")
-          case outcome :: Either SomeException () of
-            Left exception -> error "Exception in commit... curious."
-            Right _ -> return ()
-      release conn = do
-          outcome <- try (close conn)
-          case outcome :: Either SomeException () of
-            Left exception -> error "Exception in close... curious."
-            Right _ -> return ()
+      beginTransaction conn = execute_ conn "BEGIN TRANSACTION"
+      rollback conn = execute_ conn "ROLLBACK TRANSACTION"
+      commit conn = execute_ conn "COMMIT TRANSACTION"
+      release = close
 
 -- | An SQLiteManifest. Assumes the provided SQLiteDescriptor picks out a
 --   database which has a table of the specified name, with two columns as
@@ -124,21 +111,11 @@ instance ManifestRead SQLiteManifest where
       let queryString = fromString . B8.unpack . BS.concat $ statement
       -- ^ SQLite simple doesn't allow query substitution for table name and
       --   where clause simultaneously :(
-      y <- safeQuery conn queryString (Only key)
+      y <- query conn queryString (Only key)
       return $ case y :: [Only T.Text] of
         [] -> Nothing
         (y' : _) -> Just (fromOnly y')
         -- ^ TBD should we warn in case more than one row is found?
-    where
-      safeQuery conn queryString key = do
-          outcome <- liftIO $ (Right <$> query conn queryString key) `catches` handlers
-          case outcome of
-            Left problem -> mthrow problem
-            Right value -> return value
-      handlers = [
-          Handler (\(ex :: ResultError) -> return $ Left (toException ex))
-        , Handler (\(ex :: FormatError) -> return $ Left (toException ex))
-        ]
 
 instance ManifestWrite SQLiteManifest where
   mrangeDump _ = textSerialize
@@ -151,8 +128,7 @@ instance ManifestWrite SQLiteManifest where
                           , "\"=?"
                           ]
           let queryString = fromString . B8.unpack . BS.concat $ statement
-          safeExecute conn queryString (Only key)
-          --liftIO $ execute conn queryString (Only key)
+          execute conn queryString (Only key)
       Just value -> do
           let statement = [ "INSERT OR REPLACE INTO "
                           , tableName
@@ -163,21 +139,7 @@ instance ManifestWrite SQLiteManifest where
                           , "\") VALUES (?, ?)"
                           ]
           let queryString = fromString . B8.unpack . BS.concat $ statement
-          safeExecute conn queryString (key, value)
-          --liftIO $ execute conn queryString (key, value)
-    where
-      safeExecute conn queryString keysVals = do
-          outcome <- liftIO $ (Right <$> execute conn queryString keysVals) `catches` handlers
-          case outcome of
-            Left problem -> mthrow problem
-            Right value -> return value
-      handlers = [
-          Handler (\(ex :: ResultError) -> return $ Left (toException ex))
-        , Handler (\(ex :: FormatError) -> return $ Left (toException ex))
-        , Handler (\(ex :: SomeException) -> return $ Left (toException ex))
-        -- Inserting into a nonexistent table is not handled by the result or
-        -- format error cases :(
-        ]
+          liftIO $ execute conn queryString (key, value)
 
 instance ManifestInjective SQLiteManifest where
   minvert (SQLiteManifest sqld tableName domainName rangeName) =
