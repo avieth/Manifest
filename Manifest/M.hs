@@ -76,12 +76,14 @@ at_
 at_ pf x = at pf (pure $ Just x)
 
 assign
-  :: Functor f
+  :: ( Functor f
+     , Applicative f
+     )
   => PartialFunction mtype ReadWrite domain range
   -> f (Maybe domain)
   -> f (Maybe range)
-  -> M f ()
-assign pf x y = liftF (MAssign pf x y ())
+  -> M f (f ())
+assign pf x y = liftF (MAssign pf x y (pure ()))
 
 infixr 1 .:=
 
@@ -91,7 +93,7 @@ infixr 1 .:=
      )
   => (PartialFunction mtype ReadWrite domain range, domain)
   -> Maybe range
-  -> M f ()
+  -> M f (f ())
 (.:=) (pf, x) y = assign pf (pure $ Just x) (pure y)
 
 -- | Sometimes you want to switch the M computation based on the value inside
