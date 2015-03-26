@@ -30,12 +30,12 @@ import Manifest.Resource
 data PartialFunctionN :: Access -> * -> * -> * where
   PFN
     :: ( ManifestRead m
-       , ResourceDescriptor (ManifestResourceDescriptor m)
+       , ResourceDescriptor (ManifestResourceDescriptor m ftype access domain range)
        , ManifestDomainConstraint m domain range
        , ManifestRangeConstraint m domain range
        , AccessConstraint m access
        )
-    => m mtype access domain range
+    => m ftype access domain range
     -> PartialFunctionN access domain range
   CPFN
     :: PartialFunctionN access1 domain range1
@@ -47,7 +47,8 @@ data PartialFunctionN :: Access -> * -> * -> * where
 data PartialFunctionI :: Access -> * -> * -> * where
   PFI
     :: ( ManifestRead m
-       , ResourceDescriptor (ManifestResourceDescriptor m)
+       , ResourceDescriptor (ManifestResourceDescriptor m FInjective access domain range)
+       , ResourceDescriptor (ManifestResourceDescriptor m FInjective access range domain)
        , ManifestDomainConstraint m domain range
        , ManifestRangeConstraint m domain range
        , ManifestDomainConstraint m range domain
@@ -79,18 +80,19 @@ makeN pfi = case pfi of
 
 function
   :: ( ManifestRead m
-     , ResourceDescriptor (ManifestResourceDescriptor m)
+     , ResourceDescriptor (ManifestResourceDescriptor m ftype access domain range)
      , ManifestDomainConstraint m domain range
      , ManifestRangeConstraint m domain range
      , AccessConstraint m access
      )
-  => m mtype access domain range
+  => m ftype access domain range
   -> PartialFunction FNotInjective access domain range
 function = Normal . PFN
 
 injection
   :: ( ManifestRead m
-     , ResourceDescriptor (ManifestResourceDescriptor m)
+     , ResourceDescriptor (ManifestResourceDescriptor m FInjective access domain range)
+     , ResourceDescriptor (ManifestResourceDescriptor m FInjective access range domain)
      , ManifestDomainConstraint m domain range
      , ManifestRangeConstraint m domain range
      , ManifestDomainConstraint m range domain
@@ -105,9 +107,9 @@ injection
 injection = Injective . PFI
 
 compose
-  :: PartialFunction mtype1 access1 domain range1
-  -> PartialFunction mtype2 access2 range1 range
-  -> PartialFunction (FTypeMeet mtype1 mtype2) ReadOnly domain range
+  :: PartialFunction ftype1 access1 domain range1
+  -> PartialFunction ftype2 access2 range1 range
+  -> PartialFunction (FTypeMeet ftype1 ftype2) ReadOnly domain range
 compose pfA pfB = case pfA of
   Normal pfnA -> case pfB of
     Normal pfnB -> Normal $ CPFN pfnA pfnB
@@ -141,21 +143,21 @@ class (Functor f, Applicative f, Monad f) => PFStrategy f where
 
   runGet
     :: ( ManifestRead manifest
-       , ResourceDescriptor (ManifestResourceDescriptor manifest)
+       , ResourceDescriptor (ManifestResourceDescriptor manifest ftype access domain range)
        , ManifestDomainConstraint manifest domain range
        , ManifestRangeConstraint manifest domain range
        )
-    => manifest mtype access domain range
+    => manifest ftype access domain range
     -> f (Maybe domain)
     -> f (Maybe range)
 
   runSet
     :: ( ManifestWrite manifest
-       , ResourceDescriptor (ManifestResourceDescriptor manifest)
+       , ResourceDescriptor (ManifestResourceDescriptor manifest ftype ReadWrite domain range)
        , ManifestDomainConstraint manifest domain range
        , ManifestRangeConstraint manifest domain range
        )
-    => manifest mtype ReadWrite domain range
+    => manifest ftype ReadWrite domain range
     -> f (Maybe domain)
     -> f (Maybe range)
     -> f ()
@@ -163,7 +165,7 @@ class (Functor f, Applicative f, Monad f) => PFStrategy f where
 runAt
   :: ( PFStrategy f
      )
-  => PartialFunction mtype access domain range
+  => PartialFunction ftype access domain range
   -> f (Maybe domain)
   -> f (Maybe range)
 runAt pf x = case pf of
@@ -184,7 +186,7 @@ runAt pf x = case pf of
 runAssign
   :: ( PFStrategy f
      )
-  => PartialFunction mtype ReadWrite domain range
+  => PartialFunction ftype ReadWrite domain range
   -> f (Maybe domain)
   -> f (Maybe range)
   -> f ()
@@ -202,7 +204,7 @@ runGet
      , ManifestDomainConstraint manifest domain range
      , ManifestRangeConstraint manifest domain range
      )
-  => manifest mtype access domain range
+  => manifest ftype access domain range
   -> domain
   -> StateT (DM.DependentMap DResourceMap DResourceKey Resource) IO (Maybe range)
 runGet manifest x = do
@@ -224,7 +226,7 @@ runSet
      , ManifestDomainConstraint manifest domain range
      , ManifestRangeConstraint manifest domain range
      )
-  => manifest mtype ReadWrite domain range
+  => manifest ftype ReadWrite domain range
   -> domain
   -> Maybe range
   -> StateT (DM.DependentMap DResourceMap DResourceKey Resource) IO ()
