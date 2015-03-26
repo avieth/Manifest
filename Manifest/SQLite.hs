@@ -121,7 +121,7 @@ instance ManifestWrite SQLiteManifest where
     Just value -> do
         let statement = [ "INSERT OR REPLACE INTO "
                         , tableName
-                        , "(\""
+                        , " (\""
                         , domainName
                         , "\", \""
                         , rangeName
