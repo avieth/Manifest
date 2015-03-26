@@ -125,9 +125,21 @@ runMF
   => MF f (f a)
   -> f a
 runMF term = case term of
-    MAt pf domain next -> next (runAt pf domain)
-    MAssign pf domain range next -> runAssign pf domain range *> next
+    MAt pf mx next -> next (check pf mx)
+    MAssign pf mx my next -> assignment pf mx my *> next
     MInspect fx next -> next fx
+  where
+    check pf mx = do
+      x <- mx
+      case x of
+        Nothing -> return Nothing
+        Just x -> runAt pf x
+    assignment pf mx my = do
+      x <- mx
+      y <- my
+      case x of
+        Nothing -> return ()
+        Just x -> runAssign pf x y
 
 -- | iterM won't suit our needs, because it puts a return in the Pure case:
 --     iterM _ (Pure x) = return x

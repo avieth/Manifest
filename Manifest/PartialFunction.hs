@@ -132,13 +132,6 @@ pfInvert pf = case pf of
   CPFI pfA pfB -> CPFI (pfInvert pfB) (pfInvert pfA)
   IPFI pf' -> pf'
 
--- Notice how the function signatures look almost exactly like the signatures
--- of the consturctors MFAt and MFAssign.
--- We don't unroll the f around the arguments (like Maybe domain in runAt)
--- because that would demand using a bind in the M2At clause of runM2, but
--- I suspect that may be too strict. Leaving them there, we offer more
--- flexibility to the f definition: maybe it wants to fork and get the
--- domain value in another thread, for instance.
 class (Functor f, Applicative f, Monad f) => PFStrategy f where
 
   runGet
@@ -148,7 +141,7 @@ class (Functor f, Applicative f, Monad f) => PFStrategy f where
        , ManifestRangeConstraint manifest domain range
        )
     => manifest ftype access domain range
-    -> f (Maybe domain)
+    -> domain
     -> f (Maybe range)
 
   runSet
@@ -158,43 +151,43 @@ class (Functor f, Applicative f, Monad f) => PFStrategy f where
        , ManifestRangeConstraint manifest domain range
        )
     => manifest ftype ReadWrite domain range
-    -> f (Maybe domain)
-    -> f (Maybe range)
+    -> domain
+    -> Maybe range
     -> f ()
 
 runAt
   :: ( PFStrategy f
      )
   => PartialFunction ftype access domain range
-  -> f (Maybe domain)
+  -> domain
   -> f (Maybe range)
 runAt pf x = case pf of
-  Normal (PFN manifest) -> runGet manifest x
-  Injective (PFI manifest) -> runGet manifest x
-  Normal (CPFN pfA pfB) -> do
-    y <- runAt (Normal pfA) x
-    case y of
-      Nothing -> return Nothing
-      Just y' -> runAt (Normal pfB) (return $ Just y')
-  Injective (CPFI pfA pfB) -> do
-    y <- runAt (Injective pfA) x
-    case y of
-      Nothing -> return Nothing
-      Just y' -> runAt (Injective pfB) (return $ Just y')
-  Injective (IPFI pfA) -> runAt (Injective $ pfInvert pfA) x
+    Normal (PFN manifest) -> runGet manifest x
+    Injective (PFI manifest) -> runGet manifest x
+    Normal (CPFN pfA pfB) -> do
+      y <- runAt (Normal pfA) x
+      case y of
+        Nothing -> return Nothing
+        Just y' -> runAt (Normal pfB) y'
+    Injective (CPFI pfA pfB) -> do
+      y <- runAt (Injective pfA) x
+      case y of
+        Nothing -> return Nothing
+        Just y' -> runAt (Injective pfB) y'
+    Injective (IPFI pfA) -> runAt (Injective $ pfInvert pfA) x
 
 runAssign
   :: ( PFStrategy f
      )
   => PartialFunction ftype ReadWrite domain range
-  -> f (Maybe domain)
-  -> f (Maybe range)
+  -> domain
+  -> Maybe range
   -> f ()
 runAssign pf x y = case pf of
-  Normal (PFN manifest) -> runSet manifest x y
-  Injective (PFI manifest) -> runSet manifest x y
-  Injective (IPFI pf') -> runAssign (Injective $ pfInvert pf') x y
-  -- Other cases ruled out by Access type.
+    Normal (PFN manifest) -> runSet manifest x y
+    Injective (PFI manifest) -> runSet manifest x y
+    Injective (IPFI pf') -> runAssign (Injective $ pfInvert pf') x y
+    -- Other cases ruled out by Access type.
 
 
 {-
