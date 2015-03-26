@@ -12,7 +12,8 @@ import Manifest.M
 import Manifest.PartialFunction
 import Manifest.StupidStrategy
 import Manifest.Pure
-import Manifest.Volatile
+--import Manifest.Volatile
+import Manifest.SQLite
 
 data User = User T.Text
   deriving (Show, Eq, Ord)
@@ -47,6 +48,28 @@ example1 = do
   where
     appendThroughMaybe mx my = (T.append) <$> mx <*> my
 
+sqliteManifest = sqlite "test.db" "test" "domain" "range"
+
+instance TextSerializable User where
+  textSerialize (User t) = t
+  textDeserialize = Just . User
+
+userEmailsS :: PartialFunction FInjective ReadWrite User Email
+userEmailsS = injection sqliteManifest
+
+example2 :: PFStrategy f => M f (f (Maybe Email))
+example2 = do
+    x <- userEmailsS `at_` ada
+    y <- userEmailsS `at_` richard
+    return $ appendThroughMaybe <$> x <*> y
+  where
+    appendThroughMaybe mx my = (T.append) <$> mx <*> my
+
+runExample2 = do
+  let x = runM example2 :: StupidStrategy (Maybe Email)
+  runStupidStrategy x
+
+{-
 example2 :: PFStrategy f => VolatileManifest FInjective ReadWrite User Email -> M f (f (Maybe Email))
 example2 userEmailsVolatile = do
     (function userEmailsVolatile, esther) .:= Just esthersEmail
@@ -57,3 +80,4 @@ runExample2 = do
   v <- volatileManifestInjective
   let x = runM (example2 v) :: StupidStrategy (Maybe Email)
   runStupidStrategy x
+-}
