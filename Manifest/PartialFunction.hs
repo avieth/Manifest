@@ -8,6 +8,9 @@ module Manifest.PartialFunction (
 
     PartialFunction
 
+  , fmapPF
+  , contramapPF
+
   , function
   , injection
   , compose
@@ -26,6 +29,7 @@ import Control.Monad
 import Manifest.Manifest
 import Manifest.FType
 import Manifest.Resource
+import Manifest.Pure
 
 data PartialFunctionN :: Access -> * -> * -> * where
   PFN
@@ -77,6 +81,22 @@ makeN pfi = case pfi of
   PFI manifest -> PFN manifest
   CPFI pfiA pfiB -> CPFN (makeN pfiA) (makeN pfiB)
   IPFI pfi' -> makeN (pfInvert pfi')
+
+-- | Functor-like but not quite a functor because the Access parameter may
+--   change.
+fmapPF
+  :: (range -> range')
+  -> PartialFunction ftype access domain range
+  -> PartialFunction (FTypeMeet ftype FNotInjective) ReadOnly domain range'
+fmapPF f pf = pf ~> (function (pureFunction (fmap Just f)))
+
+-- | Contravariant functor-like but not quite because the Access parameter may
+--   change.
+contramapPF
+  :: (domain' -> domain)
+  -> PartialFunction ftype access domain range
+  -> PartialFunction (FTypeMeet FNotInjective ftype) ReadOnly domain' range
+contramapPF f pf = (function (pureFunction (fmap Just f))) ~> pf
 
 function
   :: ( ManifestRead m
@@ -188,51 +208,3 @@ runAssign pf x y = case pf of
     Injective (PFI manifest) -> runSet manifest x y
     Injective (IPFI pf') -> runAssign (Injective $ pfInvert pf') x y
     -- Other cases ruled out by Access type.
-
-
-{-
-runGet
-  :: ( ManifestRead manifest
-     , ResourceDescriptor (ManifestResourceDescriptor manifest)
-     , ManifestDomainConstraint manifest domain range
-     , ManifestRangeConstraint manifest domain range
-     )
-  => manifest ftype access domain range
-  -> domain
-  -> StateT (DM.DependentMap DResourceMap DResourceKey Resource) IO (Maybe range)
-runGet manifest x = do
-    dmap <- get
-    rsrc <- case DM.lookup (Identity $ resourceDescriptor manifest) dmap of
-      Nothing -> do
-          r <- liftIO $ acquireResource (resourceDescriptor manifest)
-          put $ DM.insert (Identity $ resourceDescriptor manifest) r dmap
-          return r
-      Just r -> return r
-    y <- liftIO $ mget manifest (resource rsrc) (mdomainDump manifest x)
-    return $ case y of
-      Nothing -> Nothing
-      Just y' -> mrangePull manifest y'
-
-runSet
-  :: ( ManifestWrite manifest
-     , ResourceDescriptor (ManifestResourceDescriptor manifest)
-     , ManifestDomainConstraint manifest domain range
-     , ManifestRangeConstraint manifest domain range
-     )
-  => manifest ftype ReadWrite domain range
-  -> domain
-  -> Maybe range
-  -> StateT (DM.DependentMap DResourceMap DResourceKey Resource) IO ()
-runSet manifest x y = do
-    dmap <- get
-    rsrc <- case DM.lookup (Identity $ resourceDescriptor manifest) dmap of
-      Nothing -> do
-          r <- liftIO $ acquireResource (resourceDescriptor manifest)
-          put $ DM.insert (Identity $ resourceDescriptor manifest) r dmap
-          return r
-      Just r -> return r
-    let y' = mrangeDump manifest <$> y
-    liftIO $ mset manifest (resource rsrc) (mdomainDump manifest x) y'
-
--}
-
