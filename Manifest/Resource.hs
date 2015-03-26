@@ -15,16 +15,9 @@ module Manifest.Resource (
   , rollback
   , release
 
-  , releaseAll
-  , rollbackAll
-  , commitAll
-
   , RollbackEffect
   , CommitEffect
   , ReleaseEffect
-
-  , DResourceMap
-  , DResourceKey
 
   ) where
 
@@ -81,23 +74,3 @@ instance Exception ResourceAcquisitionException where
 class (Eq rd, Typeable rd) => ResourceDescriptor rd where
   type ResourceType rd :: *
   acquireResource :: rd -> ExceptT ResourceAcquisitionException IO (Resource (ResourceType rd))
-
-type DResourceKey = Identity
-
-data DResourceMap
-type instance DM.DependentMapFunction DResourceMap a = ResourceType a
-
-releaseAll :: DM.DependentMap DResourceMap DResourceKey Resource -> IO ()
-releaseAll dmap = DM.foldWithKey releaseOne (return ()) dmap
-  where
-    releaseOne _ res io = io >> release res
-
-commitAll :: DM.DependentMap DResourceMap DResourceKey Resource -> IO ()
-commitAll dmap = DM.foldWithKey commitOne (return ()) dmap
-  where
-    commitOne _ res io = io >> commit res
-
-rollbackAll :: DM.DependentMap DResourceMap DResourceKey Resource -> IO ()
-rollbackAll dmap = DM.foldWithKey rollbackOne (return ()) dmap
-  where
-    rollbackOne _ res io = io >> rollback res
