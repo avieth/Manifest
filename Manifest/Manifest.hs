@@ -95,4 +95,4 @@ class Manifest a => ManifestInjective a where
     :: ( ftype ~ FInjective
        )
     => a ftype access domain range
-    -> a ftype access range domain
+    -> a ftype access range (Maybe domain)
