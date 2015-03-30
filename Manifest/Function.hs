@@ -14,6 +14,7 @@ module Manifest.Function (
   , (~>)
   , fmapPF
   , contramapPF
+  , pureFunction
 
   , PFStrategy(..)
   , runAt
@@ -23,8 +24,8 @@ module Manifest.Function (
 
 import Control.Applicative
 import Control.Monad
+import Data.Traversable
 import Data.Functor.Identity
-import Manifest.CommuteL
 import Manifest.Manifest
 import Manifest.Resource
 import Manifest.Pure
@@ -137,7 +138,7 @@ class (Functor f, Applicative f, Monad f) => PFStrategy f where
 runAt
   :: ( PFStrategy f
      , Monad m
-     , CommuteL m f
+     , Traversable m
      )
   => Function access domain (m range)
   -> domain
@@ -153,7 +154,7 @@ runAt pf x = case pf of
       y <- runAt pfA x
       let getNext = return . runAt pfB
       let next = y >>= getNext
-      join <$> commuteL next
+      join <$> sequenceA next
 
 runAssign
   :: ( PFStrategy f

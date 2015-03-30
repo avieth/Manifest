@@ -19,11 +19,10 @@ module Manifest.M (
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Free
-import Data.Proxy
+import Data.Traversable
 import Data.Functor.Identity
 import Manifest.Function
 import Manifest.Manifest
-import Manifest.CommuteL
 
 -- | A functor to describe a DSL which we call M, parameterized by another
 --   functor @f.
@@ -31,7 +30,7 @@ import Manifest.CommuteL
 data MF f t where
   MAt
     :: ( Monad m
-       , CommuteL m f
+       , Traversable m
        )
     => Function access domain (m range)
     -> f domain
@@ -63,7 +62,7 @@ type M f = Free (MF f)
 at
   :: ( Functor f
      , Monad m
-     , CommuteL m f
+     , Traversable m
      )
   => Function access domain (m range)
   -> f domain
@@ -73,7 +72,7 @@ at pf x = liftF (MAt pf x id)
 at_
   :: ( Applicative f
      , Monad m
-     , CommuteL m f
+     , Traversable m
      )
   => Function access domain (m range)
   -> domain
