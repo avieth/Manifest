@@ -65,13 +65,13 @@ instance PFStrategy SmartStrategy where
       let x_ = mdomainDump m x
       let getAction = mget m r x_
       y <- SCS.embedIO getAction
-      return (y >>= mrangePull m)
+      return $ mrangePull m y
 
   runSet m x y = SmartStrategy $ do
       resrc <- assureResource m
       let r = resource resrc
       let x_ = mdomainDump m x
-      let y_ = mrangeDump m <$> y
+      let y_ = mrangeDump m y
       let setAction = mset m r x_ y_
       SCS.embedIO setAction
 
