@@ -23,25 +23,24 @@ import Data.Proxy
 import Data.Functor.Identity
 import Manifest.PartialFunction
 import Manifest.Manifest
+import Manifest.CommuteL
 
 -- | A functor to describe a DSL which we call M, parameterized by another
 --   functor @f.
 --   The free monad over MF f gives the DSL.
 data MF f t where
   MAt
-    :: PartialFunction mtype access domain range
-    -> f (Maybe domain)
-    -- ^ Yes, it has to be Maybe domain.
-    --   Might be more natural to absorb the maybe into the f.
-    --   MonadPlus / Alternative constraints would then be useful, rather
-    --   than just demanding Maybe.
-    -> (f (Maybe range) -> t)
+    :: ( Monad m
+       , CommuteL m f
+       )
+    => PartialFunction mtype access domain (m range)
+    -> f domain
+    -> (f (m range) -> t)
     -> MF f t
   MAssign
-    :: PartialFunction mtype ReadWrite domain range
-    -> f (Maybe domain)
-    -- ^ See note in MAt
-    -> f (Maybe range)
+    :: PartialFunction mtype ReadWrite domain (Identity range)
+    -> f domain
+    -> f range
     -> t
     -> MF f t
   MInspect
@@ -62,26 +61,32 @@ type M f = Free (MF f)
 -- | Convenient for feeding results of `at`s to other `at`s; no need to
 --   pattern match on the Maybe; we do it for you.
 at
-  :: Functor f
-  => PartialFunction mtype access domain range
-  -> f (Maybe domain)
-  -> M f (f (Maybe range))
+  :: ( Functor f
+     , Monad m
+     , CommuteL m f
+     )
+  => PartialFunction mtype access domain (m range)
+  -> f domain
+  -> M f (f (m range))
 at pf x = liftF (MAt pf x id)
 
 at_
-  :: Applicative f
-  => PartialFunction mtype access domain range
+  :: ( Applicative f
+     , Monad m
+     , CommuteL m f
+     )
+  => PartialFunction mtype access domain (m range)
   -> domain
-  -> M f (f (Maybe range))
-at_ pf x = at pf (pure $ Just x)
+  -> M f (f (m range))
+at_ pf x = at pf (pure x)
 
 assign
   :: ( Functor f
      , Applicative f
      )
-  => PartialFunction mtype ReadWrite domain range
-  -> f (Maybe domain)
-  -> f (Maybe range)
+  => PartialFunction mtype ReadWrite domain (Identity range)
+  -> f domain
+  -> f range
   -> M f (f ())
 assign pf x y = liftF (MAssign pf x y (pure ()))
 
@@ -91,10 +96,10 @@ infixr 1 .:=
   :: ( Applicative f
      , Functor f
      )
-  => (PartialFunction mtype ReadWrite domain range, domain)
-  -> Maybe range
+  => (PartialFunction mtype ReadWrite domain (Identity range), domain)
+  -> range
   -> M f (f ())
-(.:=) (pf, x) y = assign pf (pure $ Just x) (pure y)
+(.:=) (pf, x) y = assign pf (pure x) (pure y)
 
 -- | Sometimes you want to switch the M computation based on the value inside
 --   an f. Do that via this.
@@ -125,21 +130,14 @@ runMF
   => MF f (f a)
   -> f a
 runMF term = case term of
-    MAt pf mx next -> next (check pf mx)
+    MAt pf mx next -> next (mx >>= runAt pf)
     MAssign pf mx my next -> assignment pf mx my *> next
     MInspect fx next -> next fx
   where
-    check pf mx = do
-      x <- mx
-      case x of
-        Nothing -> return Nothing
-        Just x -> runAt pf x
     assignment pf mx my = do
       x <- mx
       y <- my
-      case x of
-        Nothing -> return ()
-        Just x -> runAssign pf x y
+      runAssign pf x y
 
 -- | iterM won't suit our needs, because it puts a return in the Pure case:
 --     iterM _ (Pure x) = return x
