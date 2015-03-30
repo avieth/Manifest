@@ -21,7 +21,7 @@ import Control.Monad
 import Control.Monad.Free
 import Data.Proxy
 import Data.Functor.Identity
-import Manifest.PartialFunction
+import Manifest.Function
 import Manifest.Manifest
 import Manifest.CommuteL
 
@@ -33,12 +33,12 @@ data MF f t where
     :: ( Monad m
        , CommuteL m f
        )
-    => PartialFunction mtype access domain (m range)
+    => Function access domain (m range)
     -> f domain
     -> (f (m range) -> t)
     -> MF f t
   MAssign
-    :: PartialFunction mtype ReadWrite domain (Identity range)
+    :: Function ReadWrite domain range
     -> f domain
     -> f range
     -> t
@@ -65,7 +65,7 @@ at
      , Monad m
      , CommuteL m f
      )
-  => PartialFunction mtype access domain (m range)
+  => Function access domain (m range)
   -> f domain
   -> M f (f (m range))
 at pf x = liftF (MAt pf x id)
@@ -75,7 +75,7 @@ at_
      , Monad m
      , CommuteL m f
      )
-  => PartialFunction mtype access domain (m range)
+  => Function access domain (m range)
   -> domain
   -> M f (f (m range))
 at_ pf x = at pf (pure x)
@@ -84,7 +84,7 @@ assign
   :: ( Functor f
      , Applicative f
      )
-  => PartialFunction mtype ReadWrite domain (Identity range)
+  => Function ReadWrite domain range
   -> f domain
   -> f range
   -> M f (f ())
@@ -96,7 +96,7 @@ infixr 1 .:=
   :: ( Applicative f
      , Functor f
      )
-  => (PartialFunction mtype ReadWrite domain (Identity range), domain)
+  => (Function ReadWrite domain range, domain)
   -> range
   -> M f (f ())
 (.:=) (pf, x) y = assign pf (pure x) (pure y)

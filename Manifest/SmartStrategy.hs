@@ -35,7 +35,7 @@ import qualified Control.Concurrent.SafeConcurrentState as SCS
 import Manifest.Manifest
 import Manifest.ManifestException
 import Manifest.Resource
-import Manifest.PartialFunction
+import Manifest.Function
 
 -- TODO this strategy has everything to do with the guarantees that Manifest
 -- should provide. We ought to ditch the PFStrategy class and just demand that
@@ -65,24 +65,24 @@ instance PFStrategy SmartStrategy where
       let x_ = mdomainDump m x
       let getAction = mget m r x_
       y <- SCS.embedIO getAction
-      return $ mrangePull m y
+      return (y >>= mrangePull m)
 
   runSet m x y = SmartStrategy $ do
       resrc <- assureResource m
       let r = resource resrc
       let x_ = mdomainDump m x
-      let y_ = mrangeDump m y
+      let y_ = mrangeDump m <$> y
       let setAction = mset m r x_ y_
       SCS.embedIO setAction
 
 assureResource
   :: ( Manifest m
-     , Typeable (ManifestResourceDescriptor m ftype access domain range)
-     , Eq (ManifestResourceDescriptor m ftype access domain range)
-     , ResourceDescriptor (ManifestResourceDescriptor m ftype access domain range)
+     , Typeable (ManifestResourceDescriptor m access domain range)
+     , Eq (ManifestResourceDescriptor m access domain range)
+     , ResourceDescriptor (ManifestResourceDescriptor m access domain range)
      )
-  => m ftype access domain range
-  -> SCS.SafeConcurrentState StrategyState (Resource (ResourceType (ManifestResourceDescriptor m ftype access domain range)))
+  => m access domain range
+  -> SCS.SafeConcurrentState StrategyState (Resource (ResourceType (ManifestResourceDescriptor m access domain range)))
 assureResource m = do
     -- What we really want:
     --   let rd = resourceDescriptor m

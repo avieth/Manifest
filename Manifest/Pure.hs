@@ -16,8 +16,7 @@ Portability : non-portable (GHC only)
 module Manifest.Pure (
 
     PureManifest
-  , pureFunction
-  , pureInjection
+  , pureManifest
 
   ) where
 
@@ -25,7 +24,6 @@ import Data.Typeable
 import Data.Functor.Identity
 import Manifest.Manifest
 import Manifest.Resource
-import Manifest.FType
 
 -- | This resource descriptor contains no information, because a PureManifest
 --   doesn't need any information: it's immutable, so committing and rolling
@@ -42,31 +40,23 @@ instance ResourceDescriptor PureDescriptor where
       release _ = return ()
 
 -- | A pure partial function manifest.
-data PureManifest ftype access a b where
-  PureManifestN :: (a -> b) -> PureManifest FNotInjective ReadOnly a b
-  PureManifestI :: (a -> b) -> (b -> a) -> PureManifest FInjective ReadOnly a b
+data PureManifest :: Access -> * -> * -> * where
+  PureManifest :: (a -> b) -> PureManifest ReadOnly a b
 
-pureFunction :: (a -> b) -> PureManifest FNotInjective ReadOnly a b
-pureFunction = PureManifestN
-
-pureInjection :: (a -> b) -> (b -> a) -> PureManifest FInjective ReadOnly a b
-pureInjection = PureManifestI
+pureManifest :: (a -> b) -> PureManifest ReadOnly a b
+pureManifest = PureManifest
 
 instance Manifest PureManifest where
-  type ManifestResourceDescriptor PureManifest ftype access domain range = PureDescriptor
+  type ManifestResourceDescriptor PureManifest access domain range = PureDescriptor
   resourceDescriptor _ = PD
   type ManifestDomainType PureManifest domain range = domain
   type ManifestRangeType PureManifest domain range = range
   type ManifestDomainConstraint PureManifest domain range = ()
   type ManifestRangeConstraint PureManifest domain range = ()
+  type ManifestFunctor PureManifest domain range = Identity
   mdomainDump = const id
-  mrangePull = const id
+  mrangePull = const Identity
 
 instance ManifestRead PureManifest where
   mget pm () x = case pm of
-    PureManifestN f -> return $ f x
-    PureManifestI f _ -> return $ f x
-
-instance ManifestInjective PureManifest where
-  minvert pm = case pm of
-    PureManifestI f g -> PureManifestI g f
+    PureManifest f -> return . Identity . f $ x
