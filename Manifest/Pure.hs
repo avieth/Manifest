@@ -39,24 +39,24 @@ instance ResourceDescriptor PureDescriptor where
       rollback _ = return ()
       release _ = return ()
 
--- | A pure partial function manifest.
-data PureManifest :: Access -> * -> * -> * where
-  PureManifest :: (a -> b) -> PureManifest ReadOnly a b
+-- | A pure Manifest, parameterized by an arbitrary monad.
+data PureManifest :: (* -> *) -> Access -> * -> * -> * where
+  PureManifest :: (a -> m b) -> PureManifest m ReadOnly a b
 
-pureManifest :: (a -> b) -> PureManifest ReadOnly a b
+pureManifest :: (a -> m b) -> PureManifest m ReadOnly a b
 pureManifest = PureManifest
 
-instance Manifest PureManifest where
-  type ManifestResourceDescriptor PureManifest access domain range = PureDescriptor
+instance Monad m => Manifest (PureManifest m) where
+  type ManifestResourceDescriptor (PureManifest m) access domain range = PureDescriptor
   resourceDescriptor _ = PD
-  type ManifestDomainType PureManifest domain range = domain
-  type ManifestRangeType PureManifest domain range = range
-  type ManifestDomainConstraint PureManifest domain range = ()
-  type ManifestRangeConstraint PureManifest domain range = ()
-  type ManifestFunctor PureManifest domain range = Identity
+  type ManifestDomainType (PureManifest m) domain range = domain
+  type ManifestRangeType (PureManifest m) domain range = range
+  type ManifestDomainConstraint (PureManifest m) domain range = ()
+  type ManifestRangeConstraint (PureManifest m) domain range = ()
+  type ManifestFunctor (PureManifest m) domain range = m
   mdomainDump = const id
-  mrangePull = const Identity
+  mrangePull = const return
 
-instance ManifestRead PureManifest where
+instance Monad m => ManifestRead (PureManifest m) where
   mget pm () x = case pm of
-    PureManifest f -> return . Identity . f $ x
+    PureManifest f -> return . f $ x

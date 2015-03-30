@@ -7,13 +7,12 @@
 module Manifest.Function (
 
     Function
-  , abstraction
-  , concretion
+  , shift
   , function
   , compose
   , (~>)
-  , fmapPF
-  , contramapPF
+  , fmapF
+  , contramapF
   , pureFunction
 
   , PFStrategy(..)
@@ -39,6 +38,7 @@ data Function :: Access -> * -> * -> * where
        , AccessConstraint m access
        , f ~ ManifestFunctor m domain range
        , Functor f
+       , Traversable f
        )
     => m access domain range
     -> Function access domain (f range)
@@ -49,14 +49,26 @@ data Function :: Access -> * -> * -> * where
     -> Function ReadOnly domain (m range)
     -- ^ Always ReadOnly; you can only update an individual manifest, not
     --   a composition.
-  FL :: (range -> m range) -> Function access domain range -> Function ReadOnly domain (m range)
-  FD :: (m range -> range) -> Function access domain (m range) -> Function ReadOnly domain range
+  FS
+    :: ( Traversable f
+       , Traversable g
+       , Monad f
+       , Monad g
+       )
+    => (f range -> g range)
+    -> Function access domain (f range)
+    -> Function ReadOnly domain (g range)
 
-abstraction :: (range -> m range) -> Function access domain range -> Function ReadOnly domain (m range)
-abstraction = FL
-
-concretion :: (m range -> range) -> Function access domain (m range) -> Function ReadOnly domain range
-concretion = FD
+shift
+  :: ( Traversable f
+     , Traversable g
+     , Monad f
+     , Monad g
+     )
+  => (f range -> g range)
+  -> Function access domain (f range)
+  -> Function ReadOnly domain (g range)
+shift = FS
 
 function
   :: ( ManifestRead m
@@ -66,6 +78,7 @@ function
      , AccessConstraint m access
      , f ~ ManifestFunctor m domain range
      , Functor f
+     , Traversable f
      )
   => m access domain range
   -> Function access domain (f range)
@@ -87,26 +100,34 @@ infixr 1 ~>
   -> Function ReadOnly domain (m range)
 (~>) = compose
 
-pureFunction :: (a -> b) -> Function ReadOnly a b
-pureFunction = concretion runIdentity . function . pureManifest
+pureFunction :: (Monad m, Traversable m) => (a -> m b) -> Function ReadOnly a (m b)
+pureFunction f = function (pureManifest f)
 
--- | Functor-like but not quite a functor because the Access parameter may
---   change.
-fmapPF
-  :: Monad m
+pureFunction' :: (Monad m, Traversable m) => (a -> b) -> Function ReadOnly a (m b)
+pureFunction' f = function (pureManifest (return . f))
+
+identityToAny :: Monad m => Identity a -> m a
+identityToAny = return . runIdentity
+
+-- | Covariant functor-like.
+fmapF
+  :: ( Monad m
+     , Traversable m
+     )
   => (range -> range')
   -> Function access domain (m range)
   -> Function ReadOnly domain (m range')
-fmapPF f pf = pf ~> pureFunction (return . f)
+fmapF f pf = pf ~> shift identityToAny (pureFunction' f)
 
--- | Contravariant functor-like but not quite because the Access parameter may
---   change.
-contramapPF
-  :: Monad m
+-- | Contravariant functor-like.
+contramapF
+  :: ( Monad m
+     , Traversable m
+     )
   => (domain' -> domain)
   -> Function access domain (m range)
   -> Function ReadOnly domain' (m range)
-contramapPF f pf = pureFunction (return . f) ~> pf
+contramapF f pf = shift identityToAny (pureFunction' f) ~> pf
 
 class (Functor f, Applicative f, Monad f) => PFStrategy f where
 
@@ -143,18 +164,19 @@ runAt
   => Function access domain (m range)
   -> domain
   -> f (m range)
-runAt pf x = case pf of
+runAt fn x = case fn of
     FN manifest -> runGet manifest x
-    CFN pfA pfB -> do
+    CFN fnA fnB -> do
       -- we have an (m range1) and we can recurse to get an
       -- (m (f (m range2))) but what we actually need is an f (m range2) so
       -- we must commute the f out front and then fmap a join into the term.
       -- I think we get this for free if m is traversable; it's just
       -- sequence.
-      y <- runAt pfA x
-      let getNext = return . runAt pfB
+      y <- runAt fnA x
+      let getNext = return . runAt fnB
       let next = y >>= getNext
       join <$> sequenceA next
+    FS shifter g -> shifter <$> runAt g x
 
 runAssign
   :: ( PFStrategy f
