@@ -64,7 +64,7 @@ class Manifest (a :: FType -> Access -> * -> * -> *) where
     :: ManifestRangeConstraint a domain range
     => a ftype access domain range
     -> ManifestRangeType a domain range
-    -> Maybe range
+    -> range
 
 class Manifest a => ManifestRead a where
   mget
@@ -73,7 +73,7 @@ class Manifest a => ManifestRead a where
     => a ftype access domain range
     -> ResourceType (ManifestResourceDescriptor a ftype access domain range)
     -> ManifestDomainType a domain range
-    -> IO (Maybe (ManifestRangeType a domain range))
+    -> IO (ManifestRangeType a domain range)
 
 class Manifest a => ManifestWrite a where
   mrangeDump
@@ -87,7 +87,7 @@ class Manifest a => ManifestWrite a where
     => a ftype ReadWrite domain range
     -> ResourceType (ManifestResourceDescriptor a ftype ReadWrite domain range)
     -> ManifestDomainType a domain range
-    -> Maybe (ManifestRangeType a domain range)
+    -> ManifestRangeType a domain range
     -> IO ()
 
 class Manifest a => ManifestInjective a where

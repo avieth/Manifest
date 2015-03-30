@@ -22,6 +22,7 @@ module Manifest.Pure (
   ) where
 
 import Data.Typeable
+import Data.Functor.Identity
 import Manifest.Manifest
 import Manifest.Resource
 import Manifest.FType
@@ -42,13 +43,13 @@ instance ResourceDescriptor PureDescriptor where
 
 -- | A pure partial function manifest.
 data PureManifest ftype access a b where
-  PureManifestN :: (a -> Maybe b) -> PureManifest FNotInjective ReadOnly a b
-  PureManifestI :: (a -> Maybe b) -> (b -> Maybe a) -> PureManifest FInjective ReadOnly a b
+  PureManifestN :: (a -> b) -> PureManifest FNotInjective ReadOnly a b
+  PureManifestI :: (a -> b) -> (b -> a) -> PureManifest FInjective ReadOnly a b
 
-pureFunction :: (a -> Maybe b) -> PureManifest FNotInjective ReadOnly a b
+pureFunction :: (a -> b) -> PureManifest FNotInjective ReadOnly a b
 pureFunction = PureManifestN
 
-pureInjection :: (a -> Maybe b) -> (b -> Maybe a) -> PureManifest FInjective ReadOnly a b
+pureInjection :: (a -> b) -> (b -> a) -> PureManifest FInjective ReadOnly a b
 pureInjection = PureManifestI
 
 instance Manifest PureManifest where
@@ -59,7 +60,7 @@ instance Manifest PureManifest where
   type ManifestDomainConstraint PureManifest domain range = ()
   type ManifestRangeConstraint PureManifest domain range = ()
   mdomainDump = const id
-  mrangePull = const Just
+  mrangePull = const id
 
 instance ManifestRead PureManifest where
   mget pm () x = case pm of
