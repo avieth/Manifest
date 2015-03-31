@@ -33,15 +33,37 @@ import Manifest.ManifestException
 import Manifest.Resource
 import Manifest.FType
 
-data VolatileManifestResource domain range where
+data VolatileManifestResource :: Access -> * -> * -> * where
   VMR
     :: IORef (M.Map domain range)
     -- ^ The map at acquisition time.
     -> IORef (M.Map domain range)
     -- ^ staged changes. No TVar or MVar necessary. The f-term has a definite
     --   ordering of writes; the strategy must guarantee they are done
-    --   in-order.
-    -> VolatileManifestResource domain range
+    --   in-order... ah but this is not the case!
+    --
+    --     (f, x) .:= y
+    --     (f, x) .:= z
+    --
+    --   is nondeterministic, no? There's no guarantee that the second
+    --   assignment is carried out after the first, rather than before.
+    --   That's bad news. How can we enforce an ordering?
+    --   One vector is to do some syntactic analysis, eliminating the first
+    --   assignment. Yeah, perhaps we could come up with an M-normal form, such
+    --   that the evaluation is deterministic.
+    --
+    --     (f, x) .:= y
+    --     (f, x) .:= z
+    --     ____________
+    --     (f, x) .:= z
+    --
+    --     (f, x) .:= y
+    --     z <- f `at` x
+    --     _____________
+    --     (f, x) .:= y
+    --     return y
+    --
+    -> VolatileManifestResource access e domain range
 
 vmrWrite :: Ord domain => VolatileManifestResource domain range -> domain -> Maybe range -> IO ()
 vmrWrite (VMR _ staged) x y = modifyIORef staged (M.alter (const y) x)
