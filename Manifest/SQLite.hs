@@ -20,8 +20,11 @@ Portability : non-portable (GHC only)
 
 module Manifest.SQLite (
 
-    SQLiteManifest
-  , sqlite
+    SQLiteManifestSingle
+  , sqliteSingle
+
+  , SQLiteManifestMultiple
+  , sqliteMultiple
 
   , TextSerializable(..)
 
@@ -34,11 +37,11 @@ import qualified Data.Text as T
 import Data.String
 import Data.Typeable
 import Control.Applicative
+import Control.Monad
 import Control.Monad.Trans.State
 import Control.Monad.IO.Class
 import Control.Exception
 import Database.SQLite.Simple
-
 import Manifest.Manifest
 import Manifest.ManifestException
 import Manifest.Resource
@@ -64,8 +67,8 @@ instance ResourceDescriptor SQLiteDescriptor where
 -- | An SQLiteManifest. Assumes the provided SQLiteDescriptor picks out a
 --   database which has a table of the specified name, with two columns as
 --   specified.
-data SQLiteManifest :: Access -> * -> * -> * where
-  SQLiteManifest
+data SQLiteManifestSingle :: Access -> * -> * -> * where
+  SQLiteManifestSingle
     :: SQLiteDescriptor
     -> B8.ByteString
     -- ^ Name of the table to use.
@@ -73,32 +76,53 @@ data SQLiteManifest :: Access -> * -> * -> * where
     -- ^ Column name for domain
     -> B8.ByteString
     -- ^ Column name for range
-    -> SQLiteManifest access domain range
+    -> SQLiteManifestSingle access domain range
 
-sqlite :: String -> B8.ByteString -> B8.ByteString -> B8.ByteString -> SQLiteManifest access domain range
-sqlite file = SQLiteManifest (SQLD file)
+data SQLiteManifestMultiple :: Access -> * -> * -> * where
+  SQLiteManifestMultiple
+    :: SQLiteDescriptor
+    -> B8.ByteString
+    -> B8.ByteString
+    -> B8.ByteString
+    -> SQLiteManifestMultiple access domain range
+
+sqliteSingle :: String -> B8.ByteString -> B8.ByteString -> B8.ByteString -> SQLiteManifestSingle access domain range
+sqliteSingle file = SQLiteManifestSingle (SQLD file)
+
+sqliteMultiple :: String -> B8.ByteString -> B8.ByteString -> B8.ByteString -> SQLiteManifestMultiple access domain range
+sqliteMultiple file = SQLiteManifestMultiple (SQLD file)
 
 class TextSerializable a where
   textSerialize :: a -> T.Text
   textDeserialize :: T.Text -> Maybe a
 
+instance TextSerializable () where
+  textSerialize = const ""
+  textDeserialize = const (Just ())
+
+instance TextSerializable Int where
+  textSerialize = T.pack . show
+  textDeserialize t = case reads (T.unpack t) :: [(Int, [Char])] of
+      [(i, [])] -> Just i
+      _ -> Nothing
+
 instance TextSerializable T.Text where
   textSerialize = id
   textDeserialize = Just
 
-instance Manifest SQLiteManifest where
-  type ManifestResourceDescriptor SQLiteManifest access domain range = SQLiteDescriptor
-  resourceDescriptor (SQLiteManifest sqld _ _ _) = sqld
-  type ManifestDomainType SQLiteManifest domain range = T.Text
-  type ManifestRangeType SQLiteManifest domain range = T.Text
-  type ManifestDomainConstraint SQLiteManifest domain range = TextSerializable domain
-  type ManifestRangeConstraint SQLiteManifest domain range = TextSerializable range
-  type ManifestFunctor SQLiteManifest domain range = Maybe
+instance Manifest SQLiteManifestSingle where
+  type ManifestResourceDescriptor SQLiteManifestSingle access domain range = SQLiteDescriptor
+  resourceDescriptor (SQLiteManifestSingle sqld _ _ _) = sqld
+  type ManifestDomainType SQLiteManifestSingle domain range = T.Text
+  type ManifestRangeType SQLiteManifestSingle domain range = T.Text
+  type ManifestDomainConstraint SQLiteManifestSingle domain range = TextSerializable domain
+  type ManifestRangeConstraint SQLiteManifestSingle domain range = TextSerializable range
+  type ManifestFunctor SQLiteManifestSingle domain range = Maybe
   mdomainDump _ = textSerialize
   mrangePull _ = textDeserialize
 
-instance ManifestRead SQLiteManifest where
-  mget (SQLiteManifest _ tableName domainName rangeName) conn key = do
+instance ManifestRead SQLiteManifestSingle where
+  mget (SQLiteManifestSingle _ tableName domainName rangeName) conn key = do
       let statement = [ "SELECT \""
                       , rangeName
                       , "\" FROM "
@@ -116,9 +140,9 @@ instance ManifestRead SQLiteManifest where
         (y' : _) -> Just (fromOnly y')
         -- ^ TBD should we warn in case more than one row is found?
 
-instance ManifestWrite SQLiteManifest where
+instance ManifestWrite SQLiteManifestSingle where
   mrangeDump _ = textSerialize
-  mset (SQLiteManifest _ tableName domainName rangeName) conn key value = case value of
+  mset (SQLiteManifestSingle _ tableName domainName rangeName) conn key value = case value of
       Nothing -> do
           let statement = [ "DELETE FROM "
                           , tableName
@@ -139,3 +163,57 @@ instance ManifestWrite SQLiteManifest where
                           ]
           let queryString = fromString . B8.unpack . BS.concat $ statement
           liftIO $ execute conn queryString (key, value)
+
+instance Manifest SQLiteManifestMultiple where
+  type ManifestResourceDescriptor SQLiteManifestMultiple access domain range = SQLiteDescriptor
+  resourceDescriptor (SQLiteManifestMultiple sqld _ _ _) = sqld
+  type ManifestDomainType SQLiteManifestMultiple domain range = T.Text
+  type ManifestRangeType SQLiteManifestMultiple domain range = T.Text
+  type ManifestDomainConstraint SQLiteManifestMultiple domain range = TextSerializable domain
+  type ManifestRangeConstraint SQLiteManifestMultiple domain range = TextSerializable range
+  type ManifestFunctor SQLiteManifestMultiple domain range = []
+  mdomainDump _ = textSerialize
+  mrangePull _ x = case textDeserialize x of
+      Nothing -> []
+      Just x' -> [x']
+
+instance ManifestRead SQLiteManifestMultiple where
+  mget (SQLiteManifestMultiple _ tableName domainName rangeName) conn key = do
+      let statement = [ "SELECT \""
+                      , rangeName
+                      , "\" FROM "
+                      , tableName
+                      , " WHERE \""
+                      , domainName
+                      , "\"=?"
+                      ]
+      let queryString = fromString . B8.unpack . BS.concat $ statement
+      -- ^ SQLite simple doesn't allow query substitution for table name and
+      --   where clause simultaneously :(
+      y <- query conn queryString (Only key)
+      return $ case y :: [Only T.Text] of
+        ys -> fromOnly <$> ys
+
+instance ManifestWrite SQLiteManifestMultiple where
+  mrangeDump _ = textSerialize
+  mset (SQLiteManifestMultiple _ tableName domainName rangeName) conn key value = do
+      -- Delete every record with the key.
+      let deleteStatement = [ "DELETE FROM "
+                            , tableName
+                            , " WHERE \""
+                            , domainName
+                            , "\"=?"
+                            ]
+      let queryString = fromString . B8.unpack . BS.concat $ deleteStatement
+      execute conn queryString (Only key)
+      -- Now insert everything in the value list.
+      let insertStatement = [ "INSERT INTO "
+                            , tableName
+                            , " (\""
+                            , domainName
+                            , "\", \""
+                            , rangeName
+                            , "\") VALUES (?, ?)"
+                            ]
+      let queryString = fromString . B8.unpack . BS.concat $ insertStatement
+      forM_ value (\v -> liftIO $ execute conn queryString (key, v))
